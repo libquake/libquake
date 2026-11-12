@@ -16,8 +16,8 @@ C++20 library that turns Quake 1 `.map`, `.bsp` and `.wad` files into data an en
 texture, collision hulls, entities, RGBA textures and lightmaps split by light style. `.map` files can be
 lit with a built-in baker, so levels work without running the Quake compile tools.
 
-The LibQuake Unity plugin is built on it, and the repository ships a small viewer,
-[qviewer](tools/qviewer.md).
+The [LibQuake Unity plugin](https://libquake.github.io/unity/) is built on it, and the repository ships a
+small viewer, [qviewer](tools/qviewer.md).
 
 ```cpp
 #include <quakelib/bsp/bsp_level.h>
