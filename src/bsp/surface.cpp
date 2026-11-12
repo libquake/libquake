@@ -6,11 +6,12 @@
 namespace quakelib::bsp {
 
   void Surface::Build(const bspFileContent &ctx, const fFace_t *fsurf) {
-    float mins[2], maxs[2], val;
+    // double precision matches the light tools, float extents can be off by one sample
+    double mins[2], maxs[2], val;
     int bmins[2], bmaxs[2];
 
-    mins[0] = mins[1] = FLT_MAX;
-    maxs[0] = maxs[1] = -FLT_MAX;
+    mins[0] = mins[1] = DBL_MAX;
+    maxs[0] = maxs[1] = -DBL_MAX;
 
     float max_u = 0, max_v = 0;
     float min_u = 0, min_v = 0;
@@ -46,14 +47,14 @@ namespace quakelib::bsp {
 
       v.normal = planeNormal;
 
-      for (int i = 0; i < 2; i++) {
-        val = ((double)v.point.x * tex_vecs[i][0]);
-        val += ((double)v.point.y * tex_vecs[i][1]);
-        val += ((double)v.point.z * tex_vecs[i][2]);
-        val += tex_vecs[i][3];
+      for (int j = 0; j < 2; j++) {
+        val = ((double)v.point.x * tex_vecs[j][0]);
+        val += ((double)v.point.y * tex_vecs[j][1]);
+        val += ((double)v.point.z * tex_vecs[j][2]);
+        val += tex_vecs[j][3];
 
-        mins[i] = std::min(mins[i], val);
-        maxs[i] = std::max(maxs[i], val);
+        mins[j] = std::min(mins[j], val);
+        maxs[j] = std::max(maxs[j], val);
       }
 
       v.uv.x = (v.point.dot(info->u_axis) + info->u_offset) / tex.width;
@@ -67,8 +68,8 @@ namespace quakelib::bsp {
     }
 
     for (int i = 0; i < 2; i++) {
-      bmins[i] = floor(mins[i] / 16);
-      bmaxs[i] = ceil(maxs[i] / 16);
+      bmins[i] = (int)std::floor(mins[i] / 16);
+      bmaxs[i] = (int)std::ceil(maxs[i] / 16);
 
       texturemins[i] = bmins[i] * 16;
       extents[i] = (bmaxs[i] - bmins[i]) * 16;

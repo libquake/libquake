@@ -81,13 +81,9 @@ namespace quakelib::map {
 
     void generatePolygons(const std::map<int, MapSurface::eFaceType> &faceTypes,
                           const std::map<int, textureBounds> &texBounds);
-    void windFaceVertices();
     std::vector<FacePtr> clipToBrush(const Brush &other, bool keepOnPlane);
     void indexFaceVertices();
     void calculateAABB();
-    Vertex mergeDuplicate(int from, Vertex &v);
-    boolRet<Vertex> intersectPlanes(const FacePtr &a, const FacePtr &b, const FacePtr &c);
-    static bool isLegalVertex(const Vertex &v, const std::vector<FacePtr> &faces);
     void clipFace(FacePtr face, FaceIter plane, const FaceIter &planeEnd, std::vector<FacePtr> &outFaces,
                   bool keepOnPlane, bool isCoplanar = false);
     static void splitFace(const FacePtr &in, const FacePtr &plane, FacePtr &front, FacePtr &back);

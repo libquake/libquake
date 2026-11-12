@@ -1,4 +1,5 @@
 #include <quakelib/wad/wad.h>
+#include <quakelib/wad/wad_manager.h>
 #include <snitch/snitch.hpp>
 
 using namespace quakelib::wad;
@@ -126,4 +127,85 @@ TEST_CASE("WAD - Sky texture detection", "[wad]") {
 TEST_CASE("WAD - Invalid file", "[wad]") {
   auto wad = QuakeWad::FromFile("nonexistent.wad");
   CHECK(wad == nullptr);
+}
+
+TEST_CASE("WAD - fullbright emission", "[wad]") {
+  QuakeWadOptions opts;
+  opts.flipTexHorizontal = false;
+  auto wad = QuakeWad::FromFile("tests/data/prototype.wad", opts);
+  REQUIRE(wad != nullptr);
+
+  REQUIRE_FALSE(Palette::IsFullbright(223));
+  REQUIRE(Palette::IsFullbright(224));
+  REQUIRE(Palette::IsFullbright(254));
+  REQUIRE_FALSE(Palette::IsFullbright(255));
+
+  // the button has 884 fullbright pixels, the emission keeps their color and is black elsewhere
+  auto *button = wad->GetTexture("+0button_0");
+  REQUIRE(button != nullptr);
+  REQUIRE(button->hasEmission);
+  REQUIRE(button->emission.size() == button->raw.size());
+  size_t lit = 0;
+  for (size_t i = 0; i < button->emission.size(); i++) {
+    const auto &e = button->emission[i].rgba;
+    REQUIRE(e[3] == 255);
+    if (e[0] || e[1] || e[2]) {
+      lit++;
+      for (int k = 0; k < 3; k++)
+        REQUIRE(e[k] == button->raw[i].rgba[k]);
+    }
+  }
+  REQUIRE(lit == 884);
+
+  auto *water = wad->GetTexture("*64_water1_1");
+  REQUIRE(water != nullptr);
+  REQUIRE_FALSE(water->hasEmission);
+  REQUIRE(water->emission.empty());
+
+  // sky is drawn without lighting, no emission
+  auto *sky = wad->GetTexture("sky1");
+  REQUIRE(sky != nullptr);
+  REQUIRE_FALSE(sky->hasEmission);
+}
+
+TEST_CASE("WAD - sky layers", "[wad]") {
+  QuakeWadOptions opts;
+  opts.flipTexHorizontal = false;
+  auto wad = QuakeWad::FromFile("tests/data/prototype.wad", opts);
+  REQUIRE(wad != nullptr);
+  REQUIRE(QuakeWad::IsSkyTexture("SKY1"));
+  REQUIRE_FALSE(QuakeWad::IsSkyTexture("*waterskip"));
+  REQUIRE_FALSE(QuakeWad::IsSkyTexture("risky"));
+
+  // 256x128 in the wad: the left half is the front layer, the right half the back layer
+  auto *sky = wad->GetTexture("sky1");
+  REQUIRE(sky != nullptr);
+  REQUIRE(sky->type == TTYPE_SKY_TEXTURE);
+  REQUIRE(sky->width == 128);
+  REQUIRE(sky->height == 128);
+  REQUIRE(sky->raw.size() == 128 * 128);
+  REQUIRE(sky->front.size() == 128 * 128);
+  size_t clear = 0;
+  for (const auto &c : sky->front)
+    clear += c.rgba[3] == 0;
+  // palette index 0 in the left half of sky1
+  REQUIRE(clear == 6686);
+  for (const auto &c : sky->raw)
+    REQUIRE(c.rgba[3] == 255);
+}
+
+TEST_CASE("WAD - manager folders and lookup", "[wad]") {
+  // maps name wads with paths and any case, only the file name counts
+  auto path = QuakeWadManager::FindWadFile("C:\\quake\\GFX\\PROTOTYPE.WAD", {"does/not/exist", "tests/data"});
+  REQUIRE(!path.empty());
+  REQUIRE(QuakeWadManager::FindWadFile("start.wad", {"tests/data"}).empty());
+
+  QuakeWadManager mgr;
+  REQUIRE(mgr.AddWadDirectory("tests/data") == 1);
+  REQUIRE(mgr.LoadedFiles().size() == 1);
+  // the same file again, by folder or by path, is not loaded twice
+  REQUIRE(mgr.AddWadDirectory("tests/data") == 0);
+  REQUIRE_FALSE(mgr.AddWadFile(path));
+  REQUIRE(mgr.FindTexture("+0button_0") != nullptr);
+  REQUIRE(mgr.AddWadDirectory("does/not/exist") == 0);
 }

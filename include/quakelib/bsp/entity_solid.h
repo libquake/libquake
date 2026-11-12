@@ -11,6 +11,8 @@ namespace quakelib::bsp {
     const std::vector<SurfacePtr> &Faces();
     bool IsWorldSpawn();
 
+    int ModelId() const { return m_modelId; }
+
   protected:
     void convertToOpenGLCoords();
 

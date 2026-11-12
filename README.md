@@ -10,62 +10,43 @@
     ░        ░          ░        ░                     ░ ░
 ```
 
-# LibQuake
+# libquake
 
-**LibQuake** is a modern C++ library designed to parse formats used by the Quake engine and its derivatives. It is written in C++20 and intended for tools and engine.
+C++20 library for Quake 1 `.map`, `.bsp` and `.wad` files. It turns them into meshes per texture,
+collision hulls, entities, RGBA textures and lightmaps split by light style, and bakes the lights of
+`.map` files without the Quake compile tools.
 
-## Supported formats
+- `.map`: standard and Valve 220 format, CSG, texture and lightmap uvs, light baking
+- `.bsp`: version 29 with `.lit` files, embedded textures, light styles
+- `.wad`: WAD2 textures with fullbright emission maps and split sky layers
+- C API for bindings, used by the QuakeKit Unity importer
 
-*   **Map**: Full parsing of `.map` files (Standard and Valve format).
-*   **Bsp**: Parsing of compiled `.bsp` files.
-*   **WAD**: Parsing of `.wad` (Texture archives) files.
+```cpp
+#include <quakelib/bsp/bsp_level.h>
 
-
-## Features
-
-*   **Geometry Generation (Map)**:
-    *   Brush construction from planes.
-    *   CSG (Constructive Solid Geometry) operations.
-    *   Polygon generation and winding.
-    *   Texture coordinate calculation (Standard and Valve/Source UVs).
-*   **Lightmap Generation**:
-*   **Entity Parsing**: Parsing of entity definitions and key-values.
-
-
-## Getting Started
-
-### Prerequisites
-
-*   CMake 3.10+
-*   C++20 compliant compiler
-*   (Optional) Doxygen for documentation
-
-### Building
-
-```bash
-mkdir build
-cd build
-cmake ..
-make
+quakelib::Level level = quakelib::LoadBsp("maps/start.bsp");
 ```
 
-### Running Tests
+The documentation is in `docs/` ([Zensical](https://zensical.org)): `pip install -r requirements-docs.txt`,
+then `zensical serve`.
 
-LibQuake uses `snitch` for unit testing.
+## Building
 
-```bash
-cd build
-make quakelib_unit_tests
-./bin/tests/quakelib_unit_tests
+CMake 3.10+ and a C++20 compiler.
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/bin/tests/quakelib_unit_tests
 ```
 
-## Tools
+`QLIB_BUILD_VIEWER`, `QLIB_BUILD_TESTS` (both on) and `QLIB_BUILD_EXAMPLES` (off) select what is built
+besides the library.
 
-### qviewer
+## qviewer
 
-`qviewer` is a sample application included in `tools/` that demonstrates how to load a map, load associated WADs, and render the geometry.
+A viewer for maps and bsp files in `tools/qviewer`.
 
-```bash
-./bin/qviewer -w /path/to/wad_dir/ -m /path/to/map.map
+```sh
+./build/bin/tools/qviewer -m maps/start.map -w wads/
 ```
-

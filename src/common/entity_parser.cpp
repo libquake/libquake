@@ -95,47 +95,47 @@ namespace quakelib {
   }
 
   void Entity::FillFromParsed(ParsedEntity *pe) {
+    attribMap_t all;
     for (std::string l; std::getline(pe->lines, l);) {
       auto matches = rexec_vec(l, R"(\"([\s\S]*?)\")");
-      if (matches.empty()) {
+      if (matches.size() < 2) {
         continue;
       }
+      all.emplace(matches[0], matches[1]);
+    }
+    SetFromAttributes(all);
+  }
 
-      if (matches[0] == "classname") {
-        m_classname = matches[1];
-        continue;
+  void Entity::SetFromAttributes(const attribMap_t &all) {
+    for (const auto &[key, value] : all) {
+      if (key == "classname") {
+        m_classname = value;
+      } else if (key == "_tb_name") {
+        m_tbName = value;
+      } else if (key == "_tb_type") {
+        m_tbType = value;
+      } else {
+        m_attributes.emplace(key, value);
       }
-
-      if (matches[0] == "_tb_name") {
-        m_tbName = matches[1];
-        continue;
-      }
-
-      if (matches[0] == "_tb_type") {
-        m_tbType = matches[1];
-        continue;
-      }
-
-      m_attributes.emplace(matches[0], matches[1]);
     }
   }
 
-  void PointEntity::FillFromParsed(ParsedEntity *pe) {
-    Entity::FillFromParsed(pe);
+  void PointEntity::SetFromAttributes(const attribMap_t &all) {
+    Entity::SetFromAttributes(all);
     m_origin = AttributeVec3("origin");
     m_attributes.erase("origin");
     m_angle = AttributeFloat("angle");
     m_attributes.erase("angle");
   }
 
-  void SolidEntity::FillFromParsed(ParsedEntity *pe) {
-    Entity::FillFromParsed(pe);
+  void SolidEntity::SetFromAttributes(const attribMap_t &all) {
+    Entity::SetFromAttributes(all);
     m_hasPhongShading = AttributeFloat("_phong");
     m_attributes.erase("_phong");
   }
 
-  void WorldSpawnEntity::FillFromParsed(ParsedEntity *pe) {
-    SolidEntity::FillFromParsed(pe);
+  void WorldSpawnEntity::SetFromAttributes(const attribMap_t &all) {
+    SolidEntity::SetFromAttributes(all);
     auto wadstr = AttributeStr("wad");
     std::istringstream ss(wadstr);
 

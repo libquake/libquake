@@ -101,6 +101,8 @@ namespace quakelib::map {
      */
     void LoadBuffer(const char *buffer, getTextureBoundsCb getTextureBounds);
 
+    void LoadDocument(const MapDocument &doc);
+
     /**
      * @brief Registers a callback for texture bounds retrieval.
      *
@@ -118,6 +120,8 @@ namespace quakelib::map {
      * @param cfg The new configuration to apply.
      */
     void SetConfig(const QMapConfig &cfg) { m_config = cfg; }
+
+    const QMapConfig &Config() const { return m_config; }
 
     /**
      * @brief Generates renderable geometry from brush definitions.
@@ -161,6 +165,8 @@ namespace quakelib::map {
      * @brief Checks if the map references any WAD files.
      * @return True if WADs are present, false otherwise.
      */
+    bool HasMapFile() const { return m_map_file != nullptr; }
+
     bool HasWads() const { return !m_map_file->m_wads.empty(); };
 
     /**

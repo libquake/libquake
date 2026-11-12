@@ -1,7 +1,0 @@
-nav:
-    - Introduction: index.md
-    - Map System: map.md
-    - BSP System: bsp.md
-    - Map Providers: providers.md
-    - WAD System: wad.md
-    - Common: common.md

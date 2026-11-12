@@ -13,19 +13,19 @@ namespace quakelib::bsp {
   class Surface {
   public:
     void Build(const bspFileContent &ctx, const fFace_t *fsurface);
-    int id;
-    int lightmapID;
-    const fSurfaceInfo_t *info;
-    const fFace_t *fsurface;
-    const miptex_t *textureReference;
+    int id = 0;
+    int lightmapID = 0;
+    const fSurfaceInfo_t *info = nullptr;
+    const fFace_t *fsurface = nullptr;
+    const miptex_t *textureReference = nullptr;
     vector<Vertex> verts;
     vector<uint32_t> indices;
-    uint8_t *lm_samples;
-    int lm_tex_num;
-    int extents[2];
-    int texturemins[2];
-    short lm_s;
-    short lm_t;
+    const uint8_t *lm_samples = nullptr;
+    int lm_tex_num = 0;
+    int extents[2] = {0, 0};
+    int texturemins[2] = {0, 0};
+    short lm_s = 0;
+    short lm_t = 0;
 
   private:
     void calculateSurfaceExtents();

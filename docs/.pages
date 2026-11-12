@@ -1,7 +1,0 @@
-nav:
-    - Home: index.md
-    - Concepts: common
-    - Map System: map
-    - BSP System: bsp
-    - WAD System: wad
-    - Reference: api

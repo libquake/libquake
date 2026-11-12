@@ -7,9 +7,11 @@
 #include <quakelib/config.h>
 #include <quakelib/entities.h>
 
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <map>
+#include <memory>
 
 namespace quakelib::bsp {
   using EntityPtr = std::shared_ptr<quakelib::Entity>;
@@ -17,6 +19,7 @@ namespace quakelib::bsp {
   enum EQBspStatus {
     QBSP_OK = 0,
     QBSP_ERR_WRONG_VERSION = -1001,
+    QBSP_ERR_CANNOT_OPEN = -1002,
   };
 
   struct bspTexure {
@@ -25,15 +28,15 @@ namespace quakelib::bsp {
     bspTexure(const miptex_t &mt) {
       width = mt.width;
       height = mt.height;
-      name = string(mt.name);
+      name = string(mt.name, strnlen(mt.name, MAX_TEXNAME));
     };
 
     std::string name;
-    uint32_t id;
-    uint32_t width;
-    uint32_t height;
-    bool hasData;
-    unsigned char *data;
+    uint32_t id = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    bool hasData = false;
+    unsigned char *data = nullptr;
   };
 
   /**
@@ -191,6 +194,14 @@ namespace quakelib::bsp {
      */
     const Lightmap *LightMap() const;
 
+    /// raw text of the entity lump
+    const std::string &EntityLump() const { return m_entityLump; }
+
+    /**
+     * @brief Mutable lightmap access, used to change and animate light styles.
+     */
+    Lightmap *LightMap();
+
   private:
     void parseEntities(const char *entsrc);
     int loadTextureInfo();
@@ -210,6 +221,7 @@ namespace quakelib::bsp {
     SolidEntityPtr m_worldSpawn;
 
     bspFileContent m_content;
-    Lightmap *m_lm;
+    std::string m_entityLump;
+    std::unique_ptr<Lightmap> m_lm;
   };
 } // namespace quakelib::bsp

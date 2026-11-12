@@ -149,7 +149,7 @@ namespace quakelib::bsp {
   };
 
   struct bspFileContent {
-    header_t header;
+    header_t header{};
     vector<fPlane_t> planes;
     vector<fLeaf_t> leafs;
     vector<fNode_t> nodes;

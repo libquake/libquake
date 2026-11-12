@@ -1,18 +1,31 @@
+#include "map_mesh.h"
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <iostream>
 #include <quakelib/map/map.h>
+
 #include <quakelib/map/qmap_provider.h>
+#include <tuple>
+#include <unordered_map>
 #include <xatlas/xatlas.h>
 
 namespace quakelib {
 
   bool QMapProvider::Load(const std::string &path) {
+    invalidateMeshes();
     try {
-      m_map.LoadFile(path, nullptr);
+      auto doc = ParseMap(path);
+      m_map.LoadDocument(doc);
+      m_entities.clear();
+      for (auto &e : doc.entities)
+        m_entities.push_back(std::move(e.properties));
 
-      // Default Common Types
+      // tool textures of the quake / trenchbroom workflow, none of them is drawn
       SetFaceType("clip", SurfaceType::CLIP);
-      SetFaceType("trigger", SurfaceType::CLIP); // Triggers are usually clip/nodraw
-      SetFaceType("skip", SurfaceType::SKIP);
+      SetFaceType("trigger", SurfaceType::CLIP);
+      for (const char *name : {"skip", "hint", "hintskip", "nodraw", "caulk", "origin"})
+        SetFaceType(name, SurfaceType::SKIP);
 
       return true;
     } catch (const std::exception &e) {
@@ -26,7 +39,13 @@ namespace quakelib {
     return Load(path);
   }
 
-  void QMapProvider::GenerateGeometry(bool csg) { m_map.GenerateGeometry(); }
+  void QMapProvider::GenerateGeometry(bool csg) {
+    auto cfg = m_map.Config();
+    cfg.csg = csg;
+    m_map.SetConfig(cfg);
+    m_map.GenerateGeometry();
+    invalidateMeshes();
+  }
 
   void QMapProvider::SetFaceType(const std::string &textureName, SurfaceType type) {
     map::MapSurface::eFaceType mapType = map::MapSurface::SOLID;
@@ -44,6 +63,7 @@ namespace quakelib {
       break;
     }
     m_map.SetFaceTypeByTextureID(textureName, mapType);
+    invalidateMeshes();
   }
 
   std::vector<SolidEntityPtr> QMapProvider::GetSolidEntities() const {
@@ -87,56 +107,51 @@ namespace quakelib {
     if (!mapEnt)
       return {};
 
-    // Phase 1: Batch faces by texture ID
-    std::map<int, std::vector<map::FacePtr>> batchedFaces;
-    const auto &brushes = mapEnt->Brushes();
-
-    for (const auto &b : brushes) {
-      for (const auto &p : b.Faces()) {
-        if (p->Type() == map::MapSurface::CLIP || p->Type() == map::MapSurface::SKIP ||
-            p->Type() == map::MapSurface::NODRAW) {
-          // We still batch them, but the render mesh will have the type set
-        }
-        batchedFaces[p->TextureID()].push_back(p);
-      }
+    if (m_lightmapOptions.method == LightmapUVOptions::Method::XAtlas) {
+      auto result = detail::BuildEntityMeshes(*mapEnt, m_map.TextureNames());
+      detail::GenerateXAtlasUVs(result, m_lightmapOptions, m_lightmapWidth, m_lightmapHeight);
+      return result;
     }
 
-    // Phase 2: Build meshes with vertex welding
-    std::vector<RenderMesh> result;
-    auto texNames = m_map.TextureNames();
+    ensureLightmapLayout();
+    auto it = m_meshCache.find(entity.get());
+    return it != m_meshCache.end() ? it->second : std::vector<RenderMesh>{};
+  }
 
-    for (auto const &[texID, faces] : batchedFaces) {
-      if (faces.empty())
-        continue;
+  const LightmapLayout &QMapProvider::GetLightmapLayout() {
+    ensureLightmapLayout();
+    return m_layout;
+  }
 
-      RenderMesh mesh;
-      if (texID >= 0 && texID < texNames.size())
-        mesh.textureName = texNames[texID];
+  void QMapProvider::invalidateMeshes() {
+    m_layoutValid = false;
+    m_meshCache.clear();
+    m_layout = {};
+    m_bakedValid = false;
+    m_baked = {};
+    m_composed.clear();
+  }
 
-      // Determine type from first face (they share texture ID)
-      switch (faces[0]->Type()) {
-      case map::MapSurface::CLIP:
-        mesh.type = SurfaceType::CLIP;
-        break;
-      case map::MapSurface::SKIP:
-        mesh.type = SurfaceType::SKIP;
-        break;
-      case map::MapSurface::NODRAW:
-        mesh.type = SurfaceType::NODRAW;
-        break;
-      default:
-        mesh.type = SurfaceType::SOLID;
-        break;
-      }
-
-      weldVertices(mesh, faces);
-      result.push_back(mesh);
+  void QMapProvider::ensureLightmapLayout() {
+    if (m_layoutValid)
+      return;
+    m_meshCache.clear();
+    std::vector<RenderMesh *> all;
+    for (const auto &e : m_map.SolidEntities()) {
+      auto &meshes = m_meshCache[e.get()];
+      meshes = detail::BuildEntityMeshes(*e, m_map.TextureNames());
     }
+    for (auto &[ent, meshes] : m_meshCache)
+      for (auto &m : meshes)
+        all.push_back(&m);
 
-    // Phase 3: Generate lightmap UVs for all meshes
-    generateLightmapUVs(result);
-
-    return result;
+    LightmapLayoutOptions opts;
+    opts.luxelSize = m_lightmapOptions.luxelSize;
+    opts.padding = (int)m_lightmapOptions.padding;
+    m_layout = BuildLightmapLayout(all, opts);
+    m_lightmapWidth = m_layout.width;
+    m_lightmapHeight = m_layout.height;
+    m_layoutValid = true;
   }
 
   std::vector<std::string> QMapProvider::GetTextureNames() const { return m_map.TextureNames(); }
@@ -150,133 +165,96 @@ namespace quakelib {
     return wads;
   }
 
-  void QMapProvider::weldVertices(RenderMesh &mesh, const std::vector<quakelib::map::FacePtr> &faces) {
-    constexpr float weld_epsilon = 0.001f;
-    std::vector<uint32_t> vertexRemap;
-
-    for (const auto &face : faces) {
-      const auto &verts = face->Vertices();
-      const auto &inds = face->Indices();
-
-      for (const auto &vert : verts) {
-        uint32_t existingIndex = UINT32_MAX;
-        for (uint32_t i = 0; i < mesh.vertices.size(); ++i) {
-          const auto &existing = mesh.vertices[i];
-
-          // Check position
-          float dx = existing.point[0] - vert.point[0];
-          float dy = existing.point[1] - vert.point[1];
-          float dz = existing.point[2] - vert.point[2];
-          float distSq = dx * dx + dy * dy + dz * dz;
-
-          if (distSq >= weld_epsilon * weld_epsilon)
-            continue;
-
-          // Check texture UVs
-          float du = existing.uv[0] - vert.uv[0];
-          float dv = existing.uv[1] - vert.uv[1];
-          if (du * du + dv * dv >= weld_epsilon * weld_epsilon)
-            continue;
-
-          // Check normal
-          float dnx = existing.normal[0] - vert.normal[0];
-          float dny = existing.normal[1] - vert.normal[1];
-          float dnz = existing.normal[2] - vert.normal[2];
-          if (dnx * dnx + dny * dny + dnz * dnz >= weld_epsilon * weld_epsilon)
-            continue;
-
-          // All attributes match - can weld
-          existingIndex = i;
-          break;
-        }
-
-        if (existingIndex != UINT32_MAX) {
-          vertexRemap.push_back(existingIndex);
-        } else {
-          vertexRemap.push_back(mesh.vertices.size());
-          mesh.vertices.push_back(vert);
-        }
-      }
-
-      for (auto idx : inds) {
-        mesh.indices.push_back(vertexRemap[idx]);
-      }
-
-      vertexRemap.clear();
-    }
-  }
-
-  void QMapProvider::generateLightmapUVs(std::vector<RenderMesh> &meshes) {
-    if (meshes.empty())
-      return;
-
-    xatlas::Atlas *atlas = xatlas::Create();
-
-    // Add all meshes to the atlas
-    for (const auto &mesh : meshes) {
-      if (mesh.vertices.empty() || mesh.indices.empty())
-        continue;
-
-      xatlas::MeshDecl meshDecl;
-      meshDecl.vertexCount = mesh.vertices.size();
-      meshDecl.vertexPositionData = &mesh.vertices[0].point;
-      meshDecl.vertexPositionStride = sizeof(Vertex);
-      meshDecl.vertexNormalData = &mesh.vertices[0].normal;
-      meshDecl.vertexNormalStride = sizeof(Vertex);
-      meshDecl.vertexUvData = &mesh.vertices[0].uv;
-      meshDecl.vertexUvStride = sizeof(Vertex);
-      meshDecl.indexCount = mesh.indices.size();
-      meshDecl.indexData = mesh.indices.data();
-      meshDecl.indexFormat = xatlas::IndexFormat::UInt32;
-
-      xatlas::AddMesh(atlas, meshDecl);
-    }
-
-    // Generate atlas with all meshes packed together
-    xatlas::Generate(atlas);
-
-    // Update each mesh with its portion of the atlas
-    for (size_t meshIdx = 0; meshIdx < meshes.size() && meshIdx < atlas->meshCount; meshIdx++) {
-      auto &mesh = meshes[meshIdx];
-      const xatlas::Mesh &xatlasMesh = atlas->meshes[meshIdx];
-
-      // Rebuild vertices and indices from xatlas output
-      std::vector<Vertex> newVertices;
-      newVertices.reserve(xatlasMesh.vertexCount);
-
-      for (uint32_t i = 0; i < xatlasMesh.vertexCount; i++) {
-        const xatlas::Vertex &xv = xatlasMesh.vertexArray[i];
-        const Vertex &origVert = mesh.vertices[xv.xref];
-
-        Vertex newVert = origVert;
-        // Update with xatlas-generated lightmap UVs (normalized to 0-1)
-        newVert.lightmap_uv[0] = xv.uv[0] / atlas->width;
-        newVert.lightmap_uv[1] = xv.uv[1] / atlas->height;
-
-        newVertices.push_back(newVert);
-      }
-
-      // Update indices
-      std::vector<uint32_t> newIndices;
-      newIndices.reserve(xatlasMesh.indexCount);
-      for (uint32_t i = 0; i < xatlasMesh.indexCount; i++) {
-        newIndices.push_back(xatlasMesh.indexArray[i]);
-      }
-
-      // Replace mesh data
-      mesh.vertices = std::move(newVertices);
-      mesh.indices = std::move(newIndices);
-    }
-
-    xatlas::Destroy(atlas);
+  void QMapProvider::SetLightmapUVOptions(const LightmapUVOptions &opts) {
+    m_lightmapOptions = opts;
+    invalidateMeshes();
   }
 
   void
   QMapProvider::SetTextureBoundsProvider(std::function<std::pair<int, int>(const std::string &)> provider) {
+    invalidateMeshes();
     m_map.RegisterTextureBounds([provider](const char *name) -> map::textureBounds {
       auto p = provider(name);
       return {(float)p.first, (float)p.second};
     });
+  }
+
+  std::vector<CollisionHull> QMapProvider::GetEntityCollisionHulls(const SolidEntityPtr &entity) {
+    auto mapEnt = std::dynamic_pointer_cast<map::SolidMapEntity>(entity);
+    if (!mapEnt)
+      return {};
+    return detail::BuildCollisionHulls(*mapEnt, m_map.TextureNames());
+  }
+
+  BakeOccluders QMapProvider::buildOccluders() {
+    std::vector<map::SolidMapEntity *> casters;
+    for (const auto &se : m_map.SolidEntities()) {
+      LevelEntity props;
+      props.classname = se->ClassName();
+      props.attributes = se->Attributes();
+      if (detail::CastsShadows(props))
+        casters.push_back(se.get());
+    }
+    return detail::BuildOccluders(casters, m_map.TextureNames(), m_extraOccluders);
+  }
+
+  std::vector<BakeLight> QMapProvider::GetMapLights(BakeOptions *optionsOut) {
+    auto lights = QuakeLightsFromEntities(m_entities, m_map.Config().convertCoordToOGL, optionsOut);
+    lights.insert(lights.end(), m_extraLights.begin(), m_extraLights.end());
+    return lights;
+  }
+
+  void QMapProvider::SetExtraLights(std::vector<BakeLight> lights) {
+    m_extraLights = std::move(lights);
+    m_bakedValid = false;
+  }
+
+  void QMapProvider::SetExtraOccluders(BakeOccluders occluders) {
+    m_extraOccluders = std::move(occluders);
+    m_bakedValid = false;
+  }
+
+  void QMapProvider::SetBakeOptions(std::optional<BakeOptions> options) {
+    m_bakeOptions = options;
+    m_bakedValid = false;
+  }
+
+  const BakedLightmap &QMapProvider::GetBakedLightmap() {
+    if (m_bakedValid)
+      return m_baked;
+    ensureLightmapLayout();
+    BakeOptions opts;
+    auto lights = GetMapLights(&opts);
+    if (m_bakeOptions)
+      opts = *m_bakeOptions;
+    m_baked = BakeLightmap(m_layout, buildOccluders(), lights, opts);
+    m_bakedValid = true;
+    m_composed = m_styles.Compose(m_baked);
+    return m_baked;
+  }
+
+  std::optional<TextureData> QMapProvider::GetLightmapData() const {
+    // baking changes the cache, the interface is const
+    auto *self = const_cast<QMapProvider *>(this);
+    if (m_lightmapOptions.method != LightmapUVOptions::Method::Planar || !m_map.HasMapFile())
+      return std::nullopt;
+    const auto &baked = self->GetBakedLightmap();
+    if (baked.width == 0)
+      return std::nullopt;
+    TextureData td;
+    td.width = baked.width;
+    td.height = baked.height;
+    td.data = m_composed;
+    return td;
+  }
+
+  void QMapProvider::SetLightStyle(int style, const std::string &pattern) {
+    m_styles.SetStyle(style, pattern);
+  }
+
+  bool QMapProvider::UpdateLightStyles(double time) {
+    m_styles.Update(time, m_baked);
+    return m_bakedValid && m_styles.Recompose(m_baked, m_composed);
   }
 
 } // namespace quakelib

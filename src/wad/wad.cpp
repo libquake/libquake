@@ -16,7 +16,8 @@ namespace quakelib::wad {
   }
 
   bool QuakeWad::IsSkyTexture(const std::string texname) {
-    return to_lower(texname).find("sky") != std::string::npos;
+    // the engine only checks the prefix
+    return to_lower(texname).rfind("sky", 0) == 0;
   }
 
   QuakeWadPtr QuakeWad::FromFile(const std::string &fileName, QuakeWadOptions opts) {

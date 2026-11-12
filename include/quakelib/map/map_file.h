@@ -4,6 +4,7 @@
 #include "types.h"
 #include <array>
 #include <map>
+#include <quakelib/map/map_document.h>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -24,13 +25,11 @@ namespace quakelib::map {
 
     int Version() { return m_mapVersion; };
 
-  private:
-    void parse_entity_attributes(std::string l, Entity *ent);
-    void parse_entity_planes(std::stringstream &lines, SolidMapEntity *ent);
-    void parse_wad_string(const std::string &wads);
+    void Load(const MapDocument &doc);
 
   private:
-    size_t getOrAddTexture(const std::string &texture);
+    Brush buildBrush(const MapBrush &src);
+    int getTextureID(const std::string &texture);
 
     int m_mapVersion = STANDARD_VERSION;
     std::string m_mapVersionStr = "100";

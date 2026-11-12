@@ -38,7 +38,7 @@ namespace quakelib::wad {
         p.m_colors[col_i].rgba[2] = buff[i + 2];
         p.m_colors[col_i].rgba[3] = 255;
 
-        if (col_i >= 240 && col_i < 255) {
+        if (IsFullbright(col_i)) {
           p.m_brightColors.push_back(p.m_colors[col_i]);
         }
         if (col_i == 255) {
@@ -51,6 +51,12 @@ namespace quakelib::wad {
     }
 
     const color GetColor(int index) const;
+
+    /// Quake draws the last 32 palette colors at full brightness regardless of lighting. 255 is the
+    /// transparent index of '{' textures and not counted.
+    static bool IsFullbright(int index) { return index >= FullbrightFirst && index < 255; }
+
+    static constexpr int FullbrightFirst = 224;
 
     const cvec &GetBrightColors() { return m_brightColors; }
 

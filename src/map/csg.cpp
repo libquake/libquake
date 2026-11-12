@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <quakelib/map/entities.h>
 
 namespace quakelib::map {
@@ -19,13 +20,18 @@ namespace quakelib::map {
     }
     for (auto &b1 : m_brushes) {
       // Skip CSG for non-solid brushes (CLIP/SKIP/NODRAW) - export them as-is
+      // the clipped brushes get their own faces, the post processing below must not touch the original
+      // brushes, they stay closed convex hulls (e.g. for collision)
+      auto cpBrush = b1;
+      for (auto &f : cpBrush.m_faces)
+        f = f->Copy();
+
       if (b1.IsNonSolidBrush()) {
-        m_clippedBrushes.push_back(b1);
+        m_clippedBrushes.push_back(cpBrush);
         b1.GetBiggerBBox(m_min, m_max);
         continue;
       }
 
-      auto cpBrush = b1;
       for (auto &b2 : m_brushes) {
         if (&b1 == &b2 || b2.m_faces.empty()) {
           continue;
@@ -55,9 +61,10 @@ namespace quakelib::map {
     m_center = math::CalculateCenterFromBBox(m_min, m_max);
     if (m_brushes.size() > 0 && m_clippedBrushes.size() > 0) {
       m_wasClipped = true;
+      // collinear cleanup has to run before the t-junction pass, the split points it adds are collinear
       weldVertices();
-      fixTJunctions();
       removeCollinearVertices();
+      fixTJunctions();
       triangulateFaces();
     }
   }
@@ -101,23 +108,23 @@ namespace quakelib::map {
 
     for (const auto &b : targetBrushes) {
       for (const auto &f : b.Faces()) {
+        if (f->Type() != MapSurface::SOLID)
+          continue;
         for (const auto &v : f->m_vertices) {
           uniqueVerts.push_back(v.point);
         }
       }
     }
 
+    // exact ordering, the positions are already snapped by weldVertices
     std::sort(uniqueVerts.begin(), uniqueVerts.end(), [](const Vec3 &a, const Vec3 &b) {
-      if (std::abs(a[0] - b[0]) > 0.001)
+      if (a[0] != b[0])
         return a[0] < b[0];
-      if (std::abs(a[1] - b[1]) > 0.001)
+      if (a[1] != b[1])
         return a[1] < b[1];
       return a[2] < b[2];
     });
-
-    auto last = std::unique(uniqueVerts.begin(), uniqueVerts.end(),
-                            [](const Vec3 &a, const Vec3 &b) { return dist3(a, b) < 0.001; });
-    uniqueVerts.erase(last, uniqueVerts.end());
+    uniqueVerts.erase(std::unique(uniqueVerts.begin(), uniqueVerts.end()), uniqueVerts.end());
 
     for (auto &b : targetBrushes) {
       bool modified = false;
@@ -126,7 +133,7 @@ namespace quakelib::map {
         const auto &oldVerts = f->m_vertices;
         size_t count = oldVerts.size();
 
-        if (count < 3)
+        if (count < 3 || f->Type() != MapSurface::SOLID)
           continue;
 
         for (size_t i = 0; i < count; ++i) {
@@ -233,130 +240,75 @@ namespace quakelib::map {
   }
 
   void SolidMapEntity::triangulateFaces() {
-    auto isPointInTriangle = [](const Vec2 &p, const Vec2 &a, const Vec2 &b, const Vec2 &c) {
-      auto sign = [](const Vec2 &p1, const Vec2 &p2, const Vec2 &p3) {
-        return (p1[0] - p3[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p3[1]);
-      };
-      float d1 = sign(p, a, b);
-      float d2 = sign(p, b, c);
-      float d3 = sign(p, c, a);
-      bool has_neg = (d1 < 0) || (d2 < 0) || (d3 < 0);
-      bool has_pos = (d1 > 0) || (d2 > 0) || (d3 > 0);
-      return !(has_neg && has_pos);
-    };
-
     auto &targetBrushes = m_wasClipped ? m_clippedBrushes : m_brushes;
+
+    auto emitTriangle = [](const FacePtr &face, const Vertex &a, const Vertex &b, const Vertex &c,
+                           std::vector<FacePtr> &out) {
+      FacePtr tri = face->Copy();
+      tri->m_vertices = {a, b, c};
+      tri->m_indices = {0, 1, 2};
+      tri->UpdateNormals();
+      out.push_back(tri);
+    };
 
     for (auto &brush : targetBrushes) {
       std::vector<FacePtr> newFaces;
       newFaces.reserve(brush.m_faces.size() * 2);
 
       for (auto &face : brush.m_faces) {
-        if (face->m_vertices.size() <= 3) {
+        const auto &verts = face->m_vertices;
+        size_t n = verts.size();
+        if (n <= 3) {
           newFaces.push_back(face);
           continue;
         }
 
-        std::vector<Vertex> &verts = face->m_vertices;
-        Vec3 normal = face->GetPlaneNormal();
+        // faces are convex, the only trouble are collinear points added by the t-junction pass.
+        // a fan from vertex c is clean if neither edge touching c carries such a point.
+        std::vector<bool> collinear(n, false);
+        bool anyCollinear = false;
+        for (size_t i = 0; i < n; ++i) {
+          Vec3 e1 = verts[i].point - verts[(i + n - 1) % n].point;
+          Vec3 e2 = verts[(i + 1) % n].point - verts[i].point;
+          float l = math::Len(e1) * math::Len(e2);
+          collinear[i] = l <= 0 || math::Len(math::Cross(e1, e2)) <= 1e-4f * l;
+          anyCollinear |= collinear[i];
+        }
 
-        int axis = 0;
-        float nx = std::abs(normal[0]);
-        float ny = std::abs(normal[1]);
-        float nz = std::abs(normal[2]);
-
-        if (ny > nx && ny > nz)
-          axis = 1;
-        else if (nz > nx && nz > ny)
-          axis = 2;
-
-        auto project = [&](const Vec3 &v) -> Vec2 {
-          if (axis == 0)
-            return {v[1], v[2]};
-          if (axis == 1)
-            return {v[0], v[2]};
-          return {v[0], v[1]};
-        };
-
-        std::vector<int> indices(verts.size());
-        for (size_t i = 0; i < verts.size(); ++i)
-          indices[i] = i;
-
-        int count = static_cast<int>(indices.size());
-        int limit = count * 2;
-
-        while (count > 2) {
-          if (limit-- <= 0)
-            break;
-
-          bool earFound = false;
-          for (int i = 0; i < count; ++i) {
-            int idxPrev = (i + count - 1) % count;
-            int idxCurr = i;
-            int idxNext = (i + 1) % count;
-
-            int nPrev = indices[idxPrev];
-            int nCurr = indices[idxCurr];
-            int nNext = indices[idxNext];
-
-            const Vertex &vP = verts[nPrev];
-            const Vertex &vC = verts[nCurr];
-            const Vertex &vN = verts[nNext];
-
-            Vec3 edgeA = vC.point - vP.point;
-            Vec3 edgeB = vN.point - vC.point;
-            Vec3 crossP = math::Cross(edgeA, edgeB);
-
-            if (math::Dot(crossP, normal) <= -1e-4f)
-              continue;
-
-            bool containsPoint = false;
-            Vec2 p2 = project(vP.point);
-            Vec2 c2 = project(vC.point);
-            Vec2 n2 = project(vN.point);
-
-            for (int k = 0; k < count; ++k) {
-              if (k == idxPrev || k == idxCurr || k == idxNext)
-                continue;
-
-              if (isPointInTriangle(project(verts[indices[k]].point), p2, c2, n2)) {
-                containsPoint = true;
-                break;
-              }
-            }
-
-            if (!containsPoint) {
-              FacePtr tri = face->Copy();
-              tri->m_vertices.clear();
-              tri->m_vertices.reserve(3);
-              tri->m_vertices.push_back(vP);
-              tri->m_vertices.push_back(vC);
-              tri->m_vertices.push_back(vN);
-              tri->m_indices = {0, 1, 2};
-
-              tri->UpdateNormals();
-              newFaces.push_back(tri);
-
-              indices.erase(indices.begin() + idxCurr);
-              count--;
-              earFound = true;
-              break;
-            }
-          }
-          if (!earFound) {
-            for (size_t i = 1; i < indices.size() - 1; ++i) {
-              FacePtr tri = face->Copy();
-              tri->m_vertices.clear();
-              tri->m_vertices.reserve(3);
-              tri->m_vertices.push_back(verts[indices[0]]);
-              tri->m_vertices.push_back(verts[indices[i]]);
-              tri->m_vertices.push_back(verts[indices[i + 1]]);
-              tri->m_indices = {0, 1, 2};
-              tri->UpdateNormals();
-              newFaces.push_back(tri);
-            }
+        int fanFrom = anyCollinear ? -1 : 0;
+        for (size_t c = 0; anyCollinear && c < n; ++c) {
+          size_t prev = (c + n - 1) % n, next = (c + 1) % n;
+          if (!collinear[c] && !collinear[prev] && !collinear[next]) {
+            fanFrom = (int)c;
             break;
           }
+        }
+
+        if (fanFrom >= 0) {
+          for (size_t i = 1; i + 1 < n; ++i) {
+            emitTriangle(face, verts[fanFrom], verts[(fanFrom + i) % n], verts[(fanFrom + i + 1) % n],
+                         newFaces);
+          }
+          continue;
+        }
+
+        // every corner has a split point next to it, fan around the centroid instead.
+        // uv and lightmap uv are affine in the position, so averaging them matches the averaged point.
+        Vertex center = verts[0];
+        center.point = Vec3{0, 0, 0};
+        center.uv = Vec2{0, 0};
+        center.lightmap_uv = Vec2{0, 0};
+        for (const auto &v : verts) {
+          center.point += v.point;
+          center.uv += v.uv;
+          center.lightmap_uv += v.lightmap_uv;
+        }
+        center.point /= (float)n;
+        center.uv /= (float)n;
+        center.lightmap_uv /= (float)n;
+
+        for (size_t i = 0; i < n; ++i) {
+          emitTriangle(face, center, verts[i], verts[(i + 1) % n], newFaces);
         }
       }
       brush.m_faces = newFaces;

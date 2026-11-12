@@ -1,5 +1,10 @@
 #pragma once
 #include "map.h"
+#include <array>
+#include <map>
+#include <optional>
+#include <quakelib/lightmap_baker.h>
+#include <quakelib/lightmap_layout.h>
 #include <quakelib/map_provider.h>
 
 namespace quakelib {
@@ -19,6 +24,8 @@ namespace quakelib {
    */
   class QMapProvider : public IMapProvider {
   public:
+    using LightmapUVOptions = quakelib::LightmapUVOptions;
+
     /**
      * @brief Default constructor.
      */
@@ -54,13 +61,87 @@ namespace quakelib {
 
     std::vector<RenderMesh> GetEntityMeshes(const SolidEntityPtr &entity) override;
 
+    /**
+     * @brief One hull per brush from the unclipped brushes. Hint and origin brushes are left out.
+     */
+    std::vector<CollisionHull> GetEntityCollisionHulls(const SolidEntityPtr &entity) override;
+
     std::vector<std::string> GetRequiredWads() const override;
     void SetTextureBoundsProvider(std::function<std::pair<int, int>(const std::string &)> provider) override;
 
+    void SetLightmapUVOptions(const LightmapUVOptions &opts);
+
+    /**
+     * @brief Configuration passed to Load().
+     */
+    const map::QMapConfig &Config() const { return m_map.Config(); }
+
+    /**
+     * @brief Size of the lightmap atlas. Planar: the shared atlas, XAtlas: the last GetEntityMeshes() call.
+     */
+    int LightmapWidth() const { return m_lightmapWidth; }
+
+    int LightmapHeight() const { return m_lightmapHeight; }
+
+    /**
+     * @brief Chart layout shared by all entities (Planar method), built on first use.
+     */
+    const LightmapLayout &GetLightmapLayout();
+
+    /**
+     * @brief Lights of the map's light entities plus the extra lights, and the worldspawn bake settings.
+     */
+    std::vector<BakeLight> GetMapLights(BakeOptions *optionsOut = nullptr);
+
+    /**
+     * @brief Lights baked in addition to the map's own, e.g. engine lights or lights of a neighbouring map
+     * segment.
+     */
+    void SetExtraLights(std::vector<BakeLight> lights);
+
+    /**
+     * @brief Geometry that casts shadows in addition to this map, e.g. neighbouring map segments.
+     */
+    void SetExtraOccluders(BakeOccluders occluders);
+
+    /**
+     * @brief Replaces the settings read from the worldspawn (minlight, anglescale, ...).
+     */
+    void SetBakeOptions(std::optional<BakeOptions> options);
+
+    /**
+     * @brief Bakes the lightmap on first use (Planar method only), later calls return the cached result.
+     */
+    const BakedLightmap &GetBakedLightmap();
+
+    /**
+     * @brief The baked lightmap with the current light style values, RGBA in the atlas of
+     * GetLightmapLayout().
+     */
+    std::optional<TextureData> GetLightmapData() const override;
+    void SetLightStyle(int style, const std::string &pattern) override;
+    bool UpdateLightStyles(double time) override;
+
   private:
-    void weldVertices(RenderMesh &mesh, const std::vector<quakelib::map::FacePtr> &faces);
-    void generateLightmapUVs(std::vector<RenderMesh> &meshes);
+    BakeOccluders buildOccluders();
+    void ensureLightmapLayout();
+    void invalidateMeshes();
+
 
     quakelib::map::QMap m_map;
+    std::vector<LevelEntity> m_entities;
+    LightmapUVOptions m_lightmapOptions;
+    LightmapLayout m_layout;
+    bool m_layoutValid = false;
+    std::map<const SolidEntity *, std::vector<RenderMesh>> m_meshCache;
+    std::vector<BakeLight> m_extraLights;
+    BakeOccluders m_extraOccluders;
+    std::optional<BakeOptions> m_bakeOptions;
+    BakedLightmap m_baked;
+    bool m_bakedValid = false;
+    LightStyleAnimator m_styles;
+    std::vector<uint8_t> m_composed;
+    int m_lightmapWidth = 0;
+    int m_lightmapHeight = 0;
   };
 } // namespace quakelib

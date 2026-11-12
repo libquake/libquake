@@ -35,6 +35,11 @@ namespace quakelib::wad {
     unsigned int width = 0;                        ///< Width in pixels.
     unsigned int height = 0;                       ///< Height in pixels.
     unsigned int mipOffsets[MAX_MIP_LEVELS];       ///< Offsets to mipmap levels.
+    bool hasEmission = false; ///< true if the texture has fullbright pixels (palette 224..254)
+    /// same layout as raw: black everywhere except the fullbright pixels, empty without fullbrights
+    cvec emission;
+    /// sky textures only: the front (cloud) layer, palette index 0 is transparent. raw is the back layer.
+    cvec front;
     QuakeTextureType type = TTYPE_DEFAULT_TEXTURE; ///< Type of the texture.
     cvec raw;                                      ///< Raw pixel data (usually RGBA).
   };
@@ -59,12 +64,10 @@ namespace quakelib::wad {
     const cvec &BaseSky() const;
 
     /**
-     * @brief Gets the alpha/second layer of the sky.
+     * @brief Gets the front layer of the sky, index 0 is transparent.
      * @return Reference to vector of colors.
      */
-    const cvec &Alphaky() const;
-
-    cvec rawFront; ///< Raw data for the front/second layer (naming history varies).
+    const cvec &FrontSky() const;
   };
 
   /**

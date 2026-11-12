@@ -1,3 +1,4 @@
+#include <cstring>
 #include <filesystem>
 #include <quakelib/bsp/qbsp.h>
 #include <quakelib/entity_parser.h>
@@ -14,8 +15,13 @@ namespace quakelib::bsp {
   }
 
   int QBsp::LoadFile(const char *fileName) {
+    m_content.header = header_t{};
     m_istream.open(fileName, std::ios::binary);
+    if (!m_istream.is_open())
+      return QBSP_ERR_CANNOT_OPEN;
     m_istream.read((char *)(&m_content.header), sizeof(header_t));
+    if (!m_istream)
+      return QBSP_ERR_WRONG_VERSION;
 
     if (m_content.header.version != MAGIC_V29 && m_content.header.version != MAGIC_V30) {
       return QBSP_ERR_WRONG_VERSION;
@@ -44,6 +50,7 @@ namespace quakelib::bsp {
       std::string entData;
       entData.resize(m_content.header.lump[LUMP_ENTITIES].length);
       m_istream.read(entData.data(), m_content.header.lump[LUMP_ENTITIES].length);
+      m_entityLump = entData;
 
       EntityParser::ParseEntites(entData, [&](ParsedEntity *pe) {
         if (pe->type == EntityType::SOLID || pe->type == EntityType::WORLDSPAWN) {
@@ -70,45 +77,39 @@ namespace quakelib::bsp {
   }
 
   void QBsp::prepareLightMaps() {
-    int lm_size = m_content.header.lump[LUMP_LIGHTING].length;
-    uint8_t *lm_dataBW = (uint8_t *)calloc(sizeof(uint8_t), lm_size);
-    m_istream.seekg(m_content.header.lump[LUMP_LIGHTING].offset, m_istream.beg);
-    m_istream.read((char *)lm_dataBW, m_content.header.lump[LUMP_LIGHTING].length);
+    const auto &lump = m_content.header.lump[LUMP_LIGHTING];
+    size_t numSamples = lump.length > 0 ? (size_t)lump.length : 0;
+    std::vector<uint8_t> rgb;
 
-    uint8_t *lm_dataRGB = nullptr;
+    // .lit files: "QLIT", int32 version (1), then 3 bytes for every byte of the lighting lump
     auto litFile = m_mapPath + ".lit";
-    bool hasLitFile = false;
-    if (std::filesystem::exists(litFile)) {
-      auto length = std::filesystem::file_size(litFile);
-      if (length > 0) {
-        std::ifstream litStream(litFile, std::ios_base::binary);
-        char magic[5] = {0};
-        litStream.read(reinterpret_cast<char *>(&magic), 4);
-        if (string(magic).compare("QLIT") == 0) {
-          lm_dataRGB = (uint8_t *)calloc(sizeof(uint8_t), length - 4);
-          litStream.read(reinterpret_cast<char *>(lm_dataRGB), length - 4);
-          lm_dataRGB = lm_dataRGB + 4;
-          lm_size = length - 8;
-          hasLitFile = true;
+    std::error_code ec;
+    if (numSamples > 0 && std::filesystem::exists(litFile, ec)) {
+      std::ifstream litStream(litFile, std::ios_base::binary);
+      char magic[4] = {0};
+      int32_t version = 0;
+      litStream.read(magic, 4);
+      litStream.read(reinterpret_cast<char *>(&version), sizeof(version));
+      if (litStream && memcmp(magic, "QLIT", 4) == 0 && version == 1) {
+        rgb.resize(numSamples * 3);
+        litStream.read(reinterpret_cast<char *>(rgb.data()), rgb.size());
+        if ((size_t)litStream.gcount() != rgb.size()) {
+          rgb.clear();
         }
       }
     }
-    if (!hasLitFile) {
-      if (lm_dataRGB != nullptr) {
-        free(lm_dataRGB);
+
+    if (rgb.empty() && numSamples > 0) {
+      std::vector<uint8_t> mono(numSamples);
+      m_istream.seekg(lump.offset, m_istream.beg);
+      m_istream.read(reinterpret_cast<char *>(mono.data()), numSamples);
+      rgb.resize(numSamples * 3);
+      for (size_t i = 0; i < numSamples; i++) {
+        rgb[i * 3 + 0] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = mono[i];
       }
-      lm_dataRGB = (uint8_t *)calloc(sizeof(uint8_t), lm_size * 3);
-      int i2 = 0;
-      for (int i = 0; i < lm_size; i++) {
-        uint8_t d = lm_dataBW[i];
-        lm_dataRGB[i2++] = d;
-        lm_dataRGB[i2++] = d;
-        lm_dataRGB[i2++] = d;
-      }
-      free(lm_dataBW);
     }
 
-    m_lm = new Lightmap(lm_dataRGB, lm_size);
+    m_lm = std::make_unique<Lightmap>(std::move(rgb));
     m_lm->PackLitSurfaces(m_solidEntities);
   }
 
@@ -135,32 +136,43 @@ namespace quakelib::bsp {
       return -1;
     }
 
-    mipheader_t mh;
-    m_istream.seekg(m_content.header.lump[LUMP_TEXTURES].offset, m_istream.beg);
-    m_istream.read((char *)(&mh.numtex), sizeof(int32_t));
-    mh.offset = (int32_t *)malloc(sizeof(int32_t) * mh.numtex);
-    m_istream.read((char *)(mh.offset), sizeof(int32_t) * mh.numtex);
+    const auto &lump = m_content.header.lump[LUMP_TEXTURES];
+    if (lump.length < (int32_t)sizeof(int32_t)) {
+      return -1;
+    }
 
-    m_content.miptextures.resize(mh.numtex);
-    m_textures.resize(mh.numtex);
-    for (int i = 0; i < mh.numtex; i++) {
-      auto mho = mh.offset[i];
-      if (mh.offset[i] < 0)
+    int32_t numtex = 0;
+    m_istream.seekg(lump.offset, m_istream.beg);
+    m_istream.read((char *)(&numtex), sizeof(int32_t));
+    if (!m_istream || numtex < 0 || (int64_t)(numtex + 1) * (int64_t)sizeof(int32_t) > lump.length) {
+      m_istream.clear();
+      return -1;
+    }
+    std::vector<int32_t> offsets(numtex);
+    m_istream.read((char *)offsets.data(), sizeof(int32_t) * numtex);
+
+    m_content.miptextures.resize(numtex);
+    m_textures.resize(numtex);
+    for (int i = 0; i < numtex; i++) {
+      if (offsets[i] < 0 || offsets[i] + (int64_t)sizeof(miptex_t) > lump.length)
         continue;
-      miptex_t miptex;
-      auto t = mh.offset[i];
-      m_istream.seekg(m_content.header.lump[LUMP_TEXTURES].offset + mh.offset[i], m_istream.beg);
+      miptex_t miptex{};
+      m_istream.seekg(lump.offset + offsets[i], m_istream.beg);
       m_istream.read((char *)(&miptex), sizeof(miptex_t));
       m_content.miptextures[i] = miptex;
       bspTexure tex(miptex);
-      if (m_config.loadTextureData) {
-        auto texOffset = m_content.header.lump[LUMP_TEXTURES].offset + mh.offset[i] + miptex.offset[0];
-        loadTexelBuff(&tex.data, texOffset, miptex.width * miptex.height);
+
+      // offset 0 means the texture has no pixel data in the bsp (e.g. qbsp -notex or external textures)
+      int64_t texSize = (int64_t)miptex.width * miptex.height;
+      int64_t texStart = (int64_t)offsets[i] + miptex.offset[0];
+      if (m_config.loadTextureData && miptex.offset[0] != 0 && texSize > 0 &&
+          texStart + texSize <= lump.length) {
+        loadTexelBuff(&tex.data, (uint32_t)(lump.offset + texStart), (uint32_t)texSize);
         tex.hasData = true;
-        tex.name = miptex.name;
       }
       m_textures[i] = tex;
     }
+    m_istream.clear();
 
     return 0;
   }
@@ -201,6 +213,8 @@ namespace quakelib::bsp {
 
   const vector<bspTexure> &QBsp::Textures() const { return m_textures; };
 
-  const Lightmap *QBsp::LightMap() const { return m_lm; };
+  const Lightmap *QBsp::LightMap() const { return m_lm.get(); };
+
+  Lightmap *QBsp::LightMap() { return m_lm.get(); };
 
 } // namespace quakelib::bsp

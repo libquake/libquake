@@ -55,9 +55,13 @@ namespace quakelib {
     std::vector<RenderMesh> GetEntityMeshes(const SolidEntityPtr &entity) override;
     std::optional<TextureData> GetTextureData(const std::string &name) const override;
     std::optional<TextureData> GetLightmapData() const override;
+    void SetLightStyle(int style, const std::string &pattern) override;
+    bool UpdateLightStyles(double time) override;
 
   private:
     std::unique_ptr<quakelib::bsp::QBsp> m_bsp;
     std::map<std::string, SurfaceType> m_faceTypes;
+    LightStyleAnimator m_styles;
+    std::vector<uint8_t> m_composed;
   };
 } // namespace quakelib

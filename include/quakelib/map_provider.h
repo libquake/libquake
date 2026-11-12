@@ -1,6 +1,7 @@
 #pragma once
 
 #include "entities.h"
+#include "level.h"
 #include "vertex.h"
 #include <functional>
 #include <memory>
@@ -14,15 +15,8 @@ namespace quakelib {
     int width;
     int height;
     std::vector<unsigned char> data; // RGBA
-  };
-
-  struct RenderMesh {
-    std::string textureName;
-    int textureWidth{0};
-    int textureHeight{0};
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-    SurfaceType type{SurfaceType::SOLID};
+    /// black except the fullbright pixels, empty if there are none
+    std::vector<unsigned char> emission;
   };
 
   class IMapProvider {
@@ -43,6 +37,12 @@ namespace quakelib {
 
     virtual std::vector<RenderMesh> GetEntityMeshes(const SolidEntityPtr &entity) = 0;
 
+    /**
+     * @brief Convex hulls of the entity's brushes for physics. Not every format has brushes (BSP), those
+     * return none.
+     */
+    virtual std::vector<CollisionHull> GetEntityCollisionHulls(const SolidEntityPtr &entity) { return {}; }
+
     virtual std::vector<std::string> GetRequiredWads() const { return {}; }
 
     virtual void SetTextureBoundsProvider(std::function<std::pair<int, int>(const std::string &)> provider) {}
@@ -50,6 +50,17 @@ namespace quakelib {
     virtual std::optional<TextureData> GetTextureData(const std::string &name) const { return std::nullopt; }
 
     virtual std::optional<TextureData> GetLightmapData() const { return std::nullopt; }
+
+    /**
+     * @brief Change a light style pattern ('a'..'z'), e.g. "a" to switch style 32 off.
+     */
+    virtual void SetLightStyle(int style, const std::string &pattern) {}
+
+    /**
+     * @brief Advance animated light styles to the given time in seconds.
+     * @return true if the lightmap changed and GetLightmapData() should be uploaded again.
+     */
+    virtual bool UpdateLightStyles(double time) { return false; }
   };
 
   using IMapProviderPtr = std::shared_ptr<IMapProvider>;

@@ -1,128 +1,145 @@
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <quakelib/bsp/lightmap.h>
-#include <string.h>
 
 namespace quakelib::bsp {
-  Lightmap::Lightmap(uint8_t *data, size_t sz) {
-    this->m_rawData = data;
-    m_size = sz;
-    m_chart = LightmapChart{0};
-  };
+  namespace {
+    int surfaceStyleCount(const Surface &surf) {
+      int n = 0;
+      while (n < MAXLIGHTMAPS && surf.fsurface->light[n] != LIGHTSTYLE_NONE)
+        n++;
+      return n;
+    }
+  } // namespace
 
-  const int Lightmap::Width() const { return m_width; }
+  Lightmap::Lightmap(std::vector<uint8_t> rgb) : m_rawData(std::move(rgb)) {}
 
-  const int Lightmap::Height() const { return m_height; }
+  Lightmap::~Lightmap() { free(m_chart.allocated); }
 
-  const vector<Color> &Lightmap::RGBA() const { return m_lightmapData; }
+  void Lightmap::PackLitSurfaces(const std::vector<SolidEntityPtr> &ents) {
+    short unlitOfs[2] = {0, 0};
 
-  void Lightmap::PackLitSurfaces(std::vector<SolidEntityPtr> ents) {
-    int maxblack[2] = {0, 0};
-    short blackofs[2] = {0, 0};
-    int blacklm;
-
-    // generate surface list
-    for (auto m : ents) {
-      for (auto surf : m->Faces()) {
-        if (surf->fsurface->lightmap != -1) {
-          surf->lm_samples = m_rawData + (surf->fsurface->lightmap * 3);
+    for (const auto &m : ents) {
+      for (const auto &surf : m->Faces()) {
+        surf->lm_samples = nullptr;
+        int numStyles = surfaceStyleCount(*surf);
+        if (surf->fsurface->lightmap >= 0 && numStyles > 0) {
+          int smax = (surf->extents[0] >> 4) + 1;
+          int tmax = (surf->extents[1] >> 4) + 1;
+          size_t start = (size_t)surf->fsurface->lightmap * 3;
+          size_t len = (size_t)smax * tmax * 3 * numStyles;
+          if (start + len <= m_rawData.size()) {
+            surf->lm_samples = m_rawData.data() + start;
+          }
         }
         m_litSurfs.push_back(surf);
       }
     }
 
-    blacklm = allocateBlock(maxblack[0] + 1, maxblack[1] + 1, &blackofs[0], &blackofs[1]);
-
-    if (m_litSurfs.size() == 0)
+    if (m_litSurfs.empty())
       return;
 
-    // TODO: do a heap sort
-    for (auto surf : m_litSurfs) {
+    // one texel shared by all faces without lighting data, filled with normal brightness below
+    int unlitBlock = allocateBlock(1, 1, &unlitOfs[0], &unlitOfs[1]);
+
+    for (const auto &surf : m_litSurfs) {
       int smax = (surf->extents[0] >> 4) + 1;
       int tmax = (surf->extents[1] >> 4) + 1;
-      this->m_sampleCount += smax * tmax;
 
       if (surf->lm_samples) {
         surf->lm_tex_num = allocateBlock(smax, tmax, &surf->lm_s, &surf->lm_t);
-        continue;
-      } else {
-        surf->lm_tex_num = blacklm;
-        surf->lm_s = blackofs[0];
-        surf->lm_t = blackofs[1];
+        if (surf->lm_tex_num >= 0)
+          continue;
+        surf->lm_samples = nullptr;
       }
+      surf->lm_tex_num = unlitBlock;
+      surf->lm_s = unlitOfs[0];
+      surf->lm_t = unlitOfs[1];
     }
 
-    // determine combined texture size and allocate memory for it
     int xblocks = (int)std::ceil(std::sqrt(m_count));
     int yblocks = (m_count + xblocks - 1) / xblocks;
-    m_width = xblocks * LM_BLOCK_WIDTH;
-    m_height = yblocks * LM_BLOCK_HEIGHT;
-    int lmsize = m_width * m_height;
-
-    m_lightmapData.resize(lmsize);
-    // compute offsets for each lightmap block
+    m_layers = {};
+    m_layers.width = xblocks * LM_BLOCK_WIDTH;
+    m_layers.height = yblocks * LM_BLOCK_HEIGHT;
     for (int i = 0; i < m_count; i++) {
-      auto *lm = &m_offsets[i];
-      lm->x = (i % xblocks) * LM_BLOCK_WIDTH;
-      lm->y = (i / xblocks) * LM_BLOCK_HEIGHT;
+      auto &lm = m_offsets[i];
+      lm.x = (i % xblocks) * LM_BLOCK_WIDTH;
+      lm.y = (i / xblocks) * LM_BLOCK_HEIGHT;
     }
 
-    // fill reserved texel
-    m_lightmapData[0].Set(0x80, 0x80, 0x80, 0xff);
+    const uint8_t normal[3] = {128, 128, 128};
+    setTexel(0, 0, 0, normal);
+    {
+      auto &lm = m_offsets[unlitBlock];
+      setTexel(0, lm.x + unlitOfs[0], lm.y + unlitOfs[1], normal);
+    }
 
-    // fill lightmap samples
-    for (auto ls : m_litSurfs) {
-      auto lmofs = ((ls->extents[0] >> 4) + 1) / (float)m_width;
-      auto lm = &m_offsets[ls->lm_tex_num];
-      float lmscalex = 1.f / 16.f / m_width;
-      float lmscaley = 1.f / 16.f / m_height;
+    const int width = m_layers.width;
+    const int height = m_layers.height;
+    float lmscalex = 1.f / 16.f / width;
+    float lmscaley = 1.f / 16.f / height;
+
+    for (const auto &ls : m_litSurfs) {
+      const auto &lm = m_offsets[ls->lm_tex_num];
 
       for (auto &v : ls->verts) {
-        auto s = v.point.dot(ls->info->u_axis) + ls->info->u_offset;
+        if (!ls->lm_samples) {
+          v.lm_uv.x = (lm.x + ls->lm_s + 0.5f) / width;
+          v.lm_uv.y = (lm.y + ls->lm_t + 0.5f) / height;
+          continue;
+        }
+
+        double s = (double)v.point.x * ls->info->u_axis.x + (double)v.point.y * ls->info->u_axis.y +
+                   (double)v.point.z * ls->info->u_axis.z + ls->info->u_offset;
         s -= ls->texturemins[0];
-        s += (ls->lm_s + lm->x) * 16;
+        s += (ls->lm_s + lm.x) * 16;
         s += 8;
-        s *= lmscalex;
 
-        auto t = v.point.dot(ls->info->v_axis) + ls->info->v_offset;
+        double t = (double)v.point.x * ls->info->v_axis.x + (double)v.point.y * ls->info->v_axis.y +
+                   (double)v.point.z * ls->info->v_axis.z + ls->info->v_offset;
         t -= ls->texturemins[1];
-        t += (ls->lm_t + lm->y) * 16;
+        t += (ls->lm_t + lm.y) * 16;
         t += 8;
-        t *= lmscaley;
 
-        v.lm_uv.x = s;
-        v.lm_uv.y = t;
+        v.lm_uv.x = (float)(s * lmscalex);
+        v.lm_uv.y = (float)(t * lmscaley);
       }
-      fillSurfaceLightmap(ls);
-    }
 
-    return;
+      writeSurfaceLayers(ls);
+    }
   }
 
-  void Lightmap::fillSurfaceLightmap(SurfacePtr surf) {
-    if (!m_rawData || !surf->lm_samples || surf->fsurface->light[0] == 255) {
+  void Lightmap::setTexel(int style, int x, int y, const uint8_t *rgb) {
+    auto &layer = m_layers.Layer(style);
+    uint8_t *px = layer.data() + ((size_t)y * m_layers.width + x) * 4;
+    // a face can list the same style twice, the engine adds both
+    for (int k = 0; k < 3; k++)
+      px[k] = px[3] ? (uint8_t)std::min(255, px[k] + rgb[k]) : rgb[k];
+    px[3] = 255;
+  }
+
+  void Lightmap::writeSurfaceLayers(const SurfacePtr &surf) {
+    if (!surf->lm_samples)
       return;
-    }
 
-    auto &lm = m_offsets[surf->lm_tex_num];
-    auto smax = (surf->extents[0] / 16) + 1;
-    auto tmax = (surf->extents[1] / 16) + 1;
-    auto xofs = lm.x + surf->lm_s;
-    auto yofs = lm.y + surf->lm_t;
-    auto facesize = smax * tmax * 3;
-
-    auto src = surf->lm_samples;
-    auto dst = &m_lightmapData.front() + yofs * m_width + xofs;
-
-    // fill our RGBA lightmap pixel buffer
-    for (int t = 0; t < tmax; t++, dst += m_width) {
-      for (int s = 0; s < smax; s++, src += 3) {
-        dst[s].Set(src[0], src[1], src[2], 0xff);
+    const auto &lm = m_offsets[surf->lm_tex_num];
+    int smax = (surf->extents[0] >> 4) + 1;
+    int tmax = (surf->extents[1] >> 4) + 1;
+    const uint8_t *src = surf->lm_samples;
+    for (int m = 0; m < MAXLIGHTMAPS && surf->fsurface->light[m] != LIGHTSTYLE_NONE; m++) {
+      int style = surf->fsurface->light[m];
+      for (int t = 0; t < tmax; t++) {
+        for (int s = 0; s < smax; s++, src += 3)
+          setTexel(style, lm.x + surf->lm_s + s, lm.y + surf->lm_t + t, src);
       }
     }
   }
 
   void Lightmap::initChart(LightmapChart *chart, int width, int height) {
-    if (chart->width != width) {
+    if (chart->width != width || !chart->allocated) {
       chart->allocated = (int *)realloc(chart->allocated, sizeof(chart->allocated[0]) * width);
     }
     memset(chart->allocated, 0, sizeof(chart->allocated[0]) * width);
@@ -177,6 +194,9 @@ namespace quakelib::bsp {
   }
 
   int Lightmap::allocateBlock(int w, int h, short *x, short *y) {
+    if (w > LM_BLOCK_WIDTH || h > LM_BLOCK_HEIGHT)
+      return -1;
+
     for (int texnum = m_lastAllocated; texnum < MAX_SANITY_LIGHTMAPS; texnum++) {
       if (texnum == m_count) {
         m_count++;
@@ -194,6 +214,6 @@ namespace quakelib::bsp {
       m_lastAllocated = texnum;
       return texnum;
     }
-    return 0;
+    return -1;
   }
 } // namespace quakelib::bsp

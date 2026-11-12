@@ -55,7 +55,12 @@ namespace quakelib {
      * @brief Populates the entity data from a ParsedEntity structure.
      * @param pe Pointer to the parsed entity data.
      */
-    virtual void FillFromParsed(ParsedEntity *pe);
+    void FillFromParsed(ParsedEntity *pe);
+
+    /**
+     * @brief Sets classname and attributes from all key / value pairs of the entity.
+     */
+    virtual void SetFromAttributes(const attribMap_t &all);
 
     /**
      * @brief Gets the classname of the entity.
@@ -126,11 +131,7 @@ namespace quakelib {
      */
     PointEntity() : Entity(EntityType::POINT) {};
 
-    /**
-     * @brief Populates the point entity data from a ParsedEntity structure.
-     * @param pe Pointer to the parsed entity data.
-     */
-    virtual void FillFromParsed(ParsedEntity *pe);
+    void SetFromAttributes(const attribMap_t &all) override;
 
     /**
      * @brief Gets the origin of the point entity.
@@ -167,11 +168,7 @@ namespace quakelib {
      */
     SolidEntity() : Entity(EntityType::SOLID) {};
 
-    /**
-     * @brief Populates the solid entity data from a ParsedEntity structure.
-     * @param pe Pointer to the parsed entity data.
-     */
-    virtual void FillFromParsed(ParsedEntity *pe);
+    void SetFromAttributes(const attribMap_t &all) override;
 
   protected:
     std::vector<Surface> m_surfaces; ///< Collection of surfaces forming the brushes.
@@ -185,11 +182,7 @@ namespace quakelib {
    */
   class WorldSpawnEntity : public SolidEntity {
   public:
-    /**
-     * @brief Populates the worldspawn data from a ParsedEntity structure.
-     * @param pe Pointer to the parsed entity data.
-     */
-    virtual void FillFromParsed(ParsedEntity *pe);
+    void SetFromAttributes(const attribMap_t &all) override;
 
   private:
     std::vector<std::string> m_wads; ///< List of WAD files used by the map.

@@ -1,14 +1,12 @@
+#include <algorithm>
 #include <iostream>
 #include <quakelib/map/brush.h>
 #include <quakelib/qmath.h>
 
 namespace quakelib::map {
-  const auto fv3zero = Vertex();
-
   void Brush::buildGeometry(const std::map<int, MapSurface::eFaceType> &faceTypes,
                             const std::map<int, textureBounds> &texBounds) {
     generatePolygons(faceTypes, texBounds);
-    windFaceVertices();
     indexFaceVertices();
     calculateAABB();
   }
@@ -21,35 +19,6 @@ namespace quakelib::map {
     outMin[0] = min[0] < outMin[0] ? min[0] : outMin[0];
     outMin[1] = min[1] < outMin[1] ? min[1] : outMin[1];
     outMin[2] = min[2] < outMin[2] ? min[2] : outMin[2];
-  }
-
-  boolRet<Vertex> Brush::intersectPlanes(const FacePtr &a, const FacePtr &b, const FacePtr &c) {
-    Vec3 n0 = a->m_planeNormal;
-    Vec3 n1 = b->m_planeNormal;
-    Vec3 n2 = c->m_planeNormal;
-
-    float denom = math::Dot(math::Cross(n0, n1), n2);
-    if (denom < math::CMP_EPSILON)
-      return boolRet<Vertex>(false, fv3zero);
-
-    Vertex v = {};
-    v.point = (math::Cross(n1, n2) * a->m_planeDist + math::Cross(n2, n0) * b->m_planeDist +
-               math::Cross(n0, n1) * c->m_planeDist) /
-              denom;
-
-    return boolRet<Vertex>(true, v);
-  }
-
-  Vertex Brush::mergeDuplicate(int from, Vertex &v) {
-    for (int n = 0; n <= from; n++) {
-      auto otherPoly = m_faces[n];
-      for (int i = 0; i < otherPoly->m_vertices.size(); i++) {
-        if (dist3(otherPoly->m_vertices[i].point, v.point) < math::CMP_EPSILON) {
-          return otherPoly->m_vertices[i];
-        }
-      }
-    }
-    return v;
   }
 
   void Brush::indexFaceVertices() {
@@ -69,43 +38,6 @@ namespace quakelib::map {
     }
   }
 
-  void Brush::windFaceVertices() {
-
-    for (auto &f : m_faces) {
-      if (f->m_vertices.size() < 3)
-        continue;
-
-      auto windFaceBasis = math::Norm(f->m_vertices[1].point - f->m_vertices[0].point);
-      auto windFaceCenter = Vec3();
-      auto windFaceNormal = math::Norm(f->m_planeNormal);
-
-      for (auto v : f->m_vertices) {
-        windFaceCenter += v.point;
-      }
-      windFaceCenter /= (float)f->m_vertices.size();
-
-      std::stable_sort(f->m_vertices.begin(), f->m_vertices.end(), [&](Vertex l, Vertex r) {
-        Vec3 u = math::Norm(windFaceBasis);
-        Vec3 v = math::Norm(math::Cross(u, windFaceNormal));
-
-        Vec3 loc_a = l.point - windFaceCenter;
-        float a_pu = math::Dot(loc_a, u);
-        float a_pv = math::Dot(loc_a, v);
-        Vec3 loc_b = r.point - windFaceCenter;
-        float b_pu = math::Dot(loc_b, u);
-        float b_pv = math::Dot(loc_b, v);
-
-        float a_angle = atan2(a_pv, a_pu);
-        float b_angle = atan2(b_pv, b_pu);
-
-        if (a_angle == b_angle) {
-          return 0;
-        }
-        return a_angle > b_angle ? 0 : 1;
-      });
-    }
-  }
-
   static Vertex interpolate(const Vertex &v1, const Vertex &v2, float t) {
     Vertex res;
     res.point = v1.point + (v2.point - v1.point) * t;
@@ -122,25 +54,25 @@ namespace quakelib::map {
 
     std::vector<Vertex> fVerts, bVerts;
     const auto &verts = in->m_vertices;
-    const auto &normal = plane->m_planeNormal;
-    const float dist = plane->m_planeDist;
+    const auto &normal = plane->m_planeNormalD;
+    const double dist = plane->m_planeDistD;
 
-    std::vector<float> dists;
+    std::vector<double> dists;
     dists.reserve(verts.size());
 
     double split_epsilon = math::CMP_EPSILON;
 
     for (const auto &v : verts) {
-      dists.push_back(math::Dot(normal, v.point) - dist);
+      dists.push_back(dot(normal, toDVec3(v.point)) - dist);
     }
 
     for (size_t i = 0; i < verts.size(); ++i) {
       const auto &v1 = verts[i];
-      float d1 = dists[i];
+      double d1 = dists[i];
 
       size_t next = (i + 1) % verts.size();
       const auto &v2 = verts[next];
-      float d2 = dists[next];
+      double d2 = dists[next];
 
       if (d1 >= -split_epsilon)
         fVerts.push_back(v1);
@@ -148,7 +80,7 @@ namespace quakelib::map {
         bVerts.push_back(v1);
 
       if ((d1 > split_epsilon && d2 < -split_epsilon) || (d1 < -split_epsilon && d2 > split_epsilon)) {
-        float t = d1 / (d1 - d2);
+        float t = (float)(d1 / (d1 - d2));
         Vertex mid = interpolate(v1, v2, t);
         fVerts.push_back(mid);
         bVerts.push_back(mid);
@@ -216,89 +148,145 @@ namespace quakelib::map {
     }
   }
 
+  static double polygonArea(const std::vector<Vertex> &verts) {
+    Vec3 area{0, 0, 0};
+    for (size_t i = 0; i < verts.size(); ++i)
+      area += math::Cross(verts[i].point, verts[(i + 1) % verts.size()].point);
+    return 0.5 * math::Len(area);
+  }
+
   std::vector<FacePtr> Brush::clipToBrush(const Brush &other, bool keepOnPlane) {
     std::vector<FacePtr> clippedFaces;
+    std::vector<FacePtr> pieces;
     auto planes_begin = other.m_faces.begin();
     auto planes_end = other.m_faces.cend();
 
     for (auto &face : m_faces) {
-      clipFace(face, planes_begin, planes_end, clippedFaces, keepOnPlane);
+      pieces.clear();
+      clipFace(face, planes_begin, planes_end, pieces, keepOnPlane);
+
+      // nothing of the face was inside the other brush, keep it whole instead of the split pieces
+      if (pieces.size() > 1) {
+        double kept = 0;
+        for (const auto &p : pieces)
+          kept += polygonArea(p->m_vertices);
+        double full = polygonArea(face->m_vertices);
+        if (std::abs(full - kept) <= full * 1e-5) {
+          clippedFaces.push_back(face);
+          continue;
+        }
+      }
+      clippedFaces.insert(clippedFaces.end(), pieces.begin(), pieces.end());
     }
     return clippedFaces;
   }
 
-  Vec3 GetUnitNormal(const Vec2 p1, const Vec2 p2, const float s) {
-    const Vec2 p3 = p1 + ((p2 - p1) * s);
+  namespace {
+    // larger than any Quake map, the base polygon of every face starts at this size and gets clipped down
+    constexpr double BASE_WINDING_SIZE = 1 << 20;
+    constexpr double CLIP_EPSILON = 1e-4;
 
-    const float m = (p3[1] - p1[1]) / (p3[0] - p1[0]);
-    const float c = p1[1] - m * p1[0];
-    const float y = (m * p1[0]) + c;
+    std::vector<DVec3> baseWinding(const DVec3 &normal, double dist) {
+      DVec3 up = std::abs(normal[2]) > 0.9 ? DVec3{1, 0, 0} : DVec3{0, 0, 1};
+      DVec3 right = normalize(cross(up, normal));
+      up = cross(normal, right);
+      DVec3 org = normal * dist;
+      right = right * BASE_WINDING_SIZE;
+      up = up * BASE_WINDING_SIZE;
+      return {org - right + up, org + right + up, org + right - up, org - right - up};
+    }
 
-    const Vec2 tangent = math::Norm(Vec2{p1[0], p2[1]});
-    Vec3 normal = Vec3{-tangent[1], 0, tangent[0]};
+    // keeps the part behind the plane, i.e. inside the brush
+    void clipWinding(std::vector<DVec3> &w, const DVec3 &normal, double dist) {
+      std::vector<DVec3> out;
+      out.reserve(w.size() + 1);
+      for (size_t i = 0; i < w.size(); ++i) {
+        const DVec3 &a = w[i];
+        const DVec3 &b = w[(i + 1) % w.size()];
+        double da = dot(normal, a) - dist;
+        double db = dot(normal, b) - dist;
+        if (da <= CLIP_EPSILON)
+          out.push_back(a);
+        if ((da > CLIP_EPSILON && db < -CLIP_EPSILON) || (da < -CLIP_EPSILON && db > CLIP_EPSILON)) {
+          out.push_back(a + (b - a) * (da / (da - db)));
+        }
+      }
+      w.swap(out);
+    }
 
-    return math::Norm(normal);
-  }
+    // map coordinates are mostly integers, snapping the rounding noise keeps shared corners identical
+    double snap(double v) {
+      double r = std::round(v);
+      return std::abs(v - r) < 1e-4 ? r : v;
+    }
+  } // namespace
 
   void Brush::generatePolygons(const std::map<int, MapSurface::eFaceType> &faceTypes,
                                const std::map<int, textureBounds> &texBounds) {
-    float phongAngle = 89.0;
-    for (int i = 0; i < m_faces.size(); i++) {
-      if (m_faces[i] == nullptr)
-        continue;
-
-      for (int j = 0; j < m_faces.size(); j++)
-        for (int k = 0; k < m_faces.size(); k++) {
-          if (i == j && i == k && j == k)
-            continue;
-
-          if (m_faces[i] == nullptr || m_faces[j] == nullptr || m_faces[k] == nullptr) {
-            continue;
-          }
-          auto kv = faceTypes.find(m_faces[k]->m_textureID);
-          if (kv != faceTypes.end()) {
-            m_faces[k]->m_type = kv->second;
-            if (m_faces[k]->m_type == MapSurface::CLIP) {
-              m_isBlockVolume = true;
-            }
-          }
-
-          auto res = intersectPlanes(m_faces[i], m_faces[j], m_faces[k]);
-          if (!res.first || !isLegalVertex(res.second, m_faces)) {
-            continue;
-          }
-
-          res.second = mergeDuplicate(i, res.second);
-
-          auto v = res.second;
-          v.normal = m_faces[i]->m_planeNormal;
-          v.normal = math::Norm(v.normal);
-          v.tangent = m_faces[k]->CalcTangent();
-
-          auto tb = texBounds.find(m_faces[k]->m_textureID);
-          if (tb != texBounds.end() && (tb->second.width > 0 && tb->second.height > 0)) {
-            v.uv = m_faces[k]->CalcUV(v.point, tb->second.width, tb->second.height);
-          }
-
-          v.lightmap_uv = m_faces[k]->CalcLightmapUV(v.point);
-
-          if (v.inList(m_faces[k]->m_vertices))
-            continue;
-          m_faces[k]->m_vertices.push_back(v);
-        }
-
-      m_faces[i]->UpdateAB();
-    }
-  }
-
-  bool Brush::isLegalVertex(const Vertex &v, const std::vector<FacePtr> &faces) {
-    for (const auto &f : faces) {
-      auto proj = math::Dot(f->m_planeNormal, v.point);
-      if (proj > f->m_planeDist && fabs(f->m_planeDist - proj) > 0.0008) {
-        return false;
+    for (auto &face : m_faces) {
+      auto kv = faceTypes.find(face->m_textureID);
+      if (kv != faceTypes.end()) {
+        face->m_type = kv->second;
+        if (face->m_type == MapSurface::CLIP)
+          m_isBlockVolume = true;
       }
     }
-    return true;
+
+    for (size_t i = 0; i < m_faces.size(); i++) {
+      auto &face = m_faces[i];
+      face->m_vertices.clear();
+      auto winding = baseWinding(face->m_planeNormalD, face->m_planeDistD);
+
+      for (size_t j = 0; j < m_faces.size() && winding.size() >= 3; j++) {
+        if (i == j)
+          continue;
+        const auto &other = m_faces[j];
+        // the same plane twice, only the first one produces a face
+        if (dot(face->m_planeNormalD, other->m_planeNormalD) > 1.0 - 1e-9 &&
+            std::abs(face->m_planeDistD - other->m_planeDistD) < CLIP_EPSILON) {
+          if (j < i)
+            winding.clear();
+          continue;
+        }
+        clipWinding(winding, other->m_planeNormalD, other->m_planeDistD);
+      }
+
+      std::vector<DVec3> points;
+      for (auto p : winding) {
+        p = {snap(p[0]), snap(p[1]), snap(p[2])};
+        if (points.empty() || std::sqrt(dot(p - points.back(), p - points.back())) > CLIP_EPSILON)
+          points.push_back(p);
+      }
+      while (points.size() > 1 &&
+             std::sqrt(dot(points.front() - points.back(), points.front() - points.back())) <= CLIP_EPSILON)
+        points.pop_back();
+      if (points.size() < 3)
+        continue;
+
+      // the rest of the library expects clockwise winding seen from the front, like Quake
+      DVec3 area{0, 0, 0};
+      for (size_t k = 0; k < points.size(); k++)
+        area = area + cross(points[k], points[(k + 1) % points.size()]);
+      if (dot(area, face->m_planeNormalD) > 0)
+        std::reverse(points.begin(), points.end());
+
+      Vec4 tangent = face->CalcTangent();
+      auto tb = texBounds.find(face->m_textureID);
+      bool hasBounds = tb != texBounds.end() && tb->second.width > 0 && tb->second.height > 0;
+
+      face->m_vertices.reserve(points.size());
+      for (const auto &p : points) {
+        Vertex v{};
+        v.point = toVec3(p);
+        v.normal = face->m_planeNormal;
+        v.tangent = tangent;
+        if (hasBounds)
+          v.uv = face->CalcUV(v.point, tb->second.width, tb->second.height);
+        v.lightmap_uv = face->CalcLightmapUV(v.point);
+        face->m_vertices.push_back(v);
+      }
+      face->UpdateAB();
+    }
   }
 
   bool Brush::DoesIntersect(const Brush &other) {
@@ -315,11 +303,15 @@ namespace quakelib::map {
   }
 
   void Brush::calculateAABB() {
-    if (m_faces[0]->m_vertices.size() == 0)
+    bool first = true;
+    for (const auto &face : m_faces) {
+      if (!face->m_vertices.empty() && first) {
+        min = max = face->m_vertices[0].point;
+        first = false;
+      }
+    }
+    if (first)
       return;
-
-    min = m_faces[0]->m_vertices[0].point;
-    max = m_faces[0]->m_vertices[0].point;
 
     for (const auto &face : m_faces)
       for (const auto &vert : face->m_vertices) {

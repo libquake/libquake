@@ -1,153 +1,79 @@
-#include <quakelib/entity_parser.h>
 #include <quakelib/map/map_file.h>
 
-#include <fstream>
-#include <iostream>
-#include <regex>
+#include <iterator>
 #include <string>
 #include <vector>
 
 namespace quakelib::map {
-  static std::vector<std::string> rexec_vec(std::string line, const std::string &regexstr) {
-    std::stringstream results;
-    std::regex re(regexstr, std::regex::icase);
+  void QMapFile::Parse(char const *buff) { Load(ParseMapText(buff)); }
 
-    std::vector<std::string> matches;
-    const std::sregex_token_iterator end;
-    for (std::sregex_token_iterator it(line.begin(), line.end(), re, 1); it != end; it++) {
-      matches.push_back(*it);
-    }
-
-    return matches;
-  }
-
-  inline std::string &ltrim(std::string &s, const char *t = " ") {
-    s.erase(0, s.find_first_not_of(t));
-    return s;
-  }
-
-  void QMapFile::Parse(char const *buff) {
-    auto strstr = std::stringstream(buff);
-    Parse(strstr);
-  }
-
-  void QMapFile::Parse(const std::string &filename) {
-    auto strstr = std::fstream(filename);
-    try {
-      strstr.exceptions(std::ios::failbit);
-    } catch (std::ios_base::failure &) {
-      throw std::system_error{errno, std::iostream_category(), filename};
-    }
-    Parse(strstr);
-    strstr.close();
-  }
+  void QMapFile::Parse(const std::string &filename) { Load(ParseMap(filename)); }
 
   void QMapFile::Parse(std::istream &stream) {
-    EntityParser::ParseEntites(stream, [&](ParsedEntity *pe) {
-      switch (pe->type) {
-      case EntityType::POINT: {
-        auto ent = std::make_shared<PointEntity>();
-        ent->FillFromParsed(pe);
-        this->m_pointEntities.push_back(ent);
-        break;
-      }
-      case EntityType::SOLID:
-      case EntityType::WORLDSPAWN: {
-        auto sent = new SolidMapEntity();
-        sent->FillFromParsed(pe);
-        this->m_solidEntities.push_back(SolidEntityPtr(sent));
-        if (pe->type == EntityType::WORLDSPAWN) {
-          this->m_worldSpawn = sent;
-          parse_wad_string(sent->AttributeStr("wad"));
-          m_mapVersionStr = sent->AttributeStr("mapversion");
-          if (!m_mapVersionStr.empty()) {
-            m_mapVersion = std::stoi(m_mapVersionStr);
-          }
-        }
-        for (auto &child : pe->children) {
-          std::stringstream lines;
-          for (std::string line; std::getline(child->lines, line);) {
-            lines << line << std::endl;
-          }
-          parse_entity_planes(lines, sent);
-        }
-        break;
-      }
-      default:
-        break;
-      }
-    });
+    std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    Load(ParseMapText(text));
   }
 
-  void QMapFile::parse_entity_planes(std::stringstream &lines, SolidMapEntity *ent) {
+  void QMapFile::Load(const MapDocument &doc) {
+    m_worldSpawn = nullptr;
+    m_solidEntities.clear();
+    m_pointEntities.clear();
+    m_textures = doc.textures;
+    m_wads = doc.wads;
+
+    for (const auto &e : doc.entities) {
+      if (!e.IsBrushEntity()) {
+        auto ent = std::make_shared<PointEntity>();
+        ent->SetFromAttributes(e.properties.attributes);
+        m_pointEntities.push_back(ent);
+        continue;
+      }
+
+      auto sent = std::make_shared<SolidMapEntity>();
+      sent->SetFromAttributes(e.properties.attributes);
+      if (e.properties.classname == "worldspawn" && m_worldSpawn == nullptr) {
+        m_worldSpawn = sent.get();
+        m_mapVersionStr = e.properties.Get("mapversion");
+        m_mapVersion = e.properties.Int("mapversion", STANDARD_VERSION);
+      }
+      for (const auto &b : e.brushes)
+        sent->m_brushes.push_back(buildBrush(b));
+      m_solidEntities.push_back(sent);
+    }
+  }
+
+  Brush QMapFile::buildBrush(const MapBrush &src) {
     Brush brush;
-    for (std::string line; std::getline(lines, line);) {
-      // Remove parentheses and brackets from the line for easier parsing
-      std::string chars = "()[]";
-      for (unsigned int i = 0; i < chars.length(); ++i) {
-        line.erase(std::remove(line.begin(), line.end(), chars[i]), line.end());
+    for (const auto &f : src.faces) {
+      std::array<DVec3, 3> planePoints{};
+      for (int p = 0; p < 3; p++)
+        planePoints[p] = {f.points[p][0], f.points[p][1], f.points[p][2]};
+      std::array<Vec3, 3> facePoints{toVec3(planePoints[0]), toVec3(planePoints[1]), toVec3(planePoints[2])};
+      int texture = getTextureID(f.texture);
+
+      FacePtr face;
+      if (f.valve) {
+        ValveUV uv{};
+        uv.u = Vec4{f.uAxis[0], f.uAxis[1], f.uAxis[2], f.uAxis[3]};
+        uv.v = Vec4{f.vAxis[0], f.vAxis[1], f.vAxis[2], f.vAxis[3]};
+        face = std::make_shared<MapSurface>(facePoints, texture, uv, f.rotation, f.scaleX, f.scaleY);
+      } else {
+        StandardUV uv{f.offsetU, f.offsetV};
+        face = std::make_shared<MapSurface>(facePoints, texture, uv, f.rotation, f.scaleX, f.scaleY);
       }
-
-      std::stringstream l(line);
-      std::array<Vec3, 3> facePoints{};
-      l >> facePoints[0][0] >> facePoints[0][1] >> facePoints[0][2];
-      l >> facePoints[1][0] >> facePoints[1][1] >> facePoints[1][2];
-      l >> facePoints[2][0] >> facePoints[2][1] >> facePoints[2][2];
-
-      std::string texture;
-      l >> texture;
-
-      ValveUV valveUV{};
-      StandardUV standardUV{};
-      switch (m_mapVersion) {
-      case VALVE_VERSION:
-        l >> valveUV.u[0] >> valveUV.u[1] >> valveUV.u[2] >> valveUV.u[3];
-        l >> valveUV.v[0] >> valveUV.v[1] >> valveUV.v[2] >> valveUV.v[3];
-        break;
-      default:
-        l >> standardUV.u >> standardUV.v;
-        break;
-      }
-
-      float rotation{}, scaleX{}, scaleY{};
-      l >> rotation >> scaleX >> scaleY;
-
-      auto face = m_mapVersion == STANDARD_VERSION
-                      ? std::make_shared<MapSurface>(facePoints, getOrAddTexture(texture), standardUV,
-                                                     rotation, scaleX, scaleY)
-                      : std::make_shared<MapSurface>(facePoints, getOrAddTexture(texture), valveUV, rotation,
-                                                     scaleX, scaleY);
-
+      face->setPlanePoints(planePoints);
       brush.m_faces.push_back(face);
     }
-    ent->m_brushes.push_back(brush);
+    return brush;
   }
 
-  size_t QMapFile::getOrAddTexture(const std::string &texture) {
-    for (int i = 0; i < m_textures.size(); i++) {
+  int QMapFile::getTextureID(const std::string &texture) {
+    for (size_t i = 0; i < m_textures.size(); i++) {
       if (m_textures[i] == texture)
-        return i;
+        return (int)i;
     }
     m_textures.push_back(texture);
-    size_t ret = m_textures.size() - 1;
-    return ret;
-  }
-
-  void QMapFile::parse_wad_string(const std::string &wads) {
-    std::istringstream ss(wads);
-    for (std::string item; std::getline(ss, item, ';');) {
-      if (item.empty())
-        continue;
-      auto pos = item.find_last_of("/\\");
-      std::string wad_name = item;
-      if (pos != std::string::npos) {
-        wad_name = item.substr(pos + 1);
-      }
-      std::vector<std::string>::iterator it = std::find(m_wads.begin(), m_wads.end(), wad_name);
-      if (it == m_wads.end()) {
-        m_wads.push_back(wad_name);
-      }
-    }
+    return (int)m_textures.size() - 1;
   }
 
 } // namespace quakelib::map

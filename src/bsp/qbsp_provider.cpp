@@ -12,7 +12,13 @@ namespace quakelib {
 
   bool QBspProvider::Load(const std::string &path, const quakelib::bsp::QBspConfig &cfg) {
     m_bsp = std::make_unique<quakelib::bsp::QBsp>(cfg);
-    return m_bsp->LoadFile(path.c_str()) == quakelib::bsp::QBSP_OK;
+    m_styles = LightStyleAnimator();
+    m_composed.clear();
+    if (m_bsp->LoadFile(path.c_str()) != quakelib::bsp::QBSP_OK)
+      return false;
+    if (const auto *lm = m_bsp->LightMap())
+      m_composed = m_styles.Compose(lm->Layers());
+    return true;
   }
 
   void QBspProvider::GenerateGeometry(bool csg) {
@@ -156,13 +162,23 @@ namespace quakelib {
         td.height = tex.height;
         td.data.resize(tex.width * tex.height * 4);
 
+        bool sky = tName.rfind("sky", 0) == 0;
+        bool emissive = false;
+        td.emission.assign(td.data.size(), 0);
         for (int i = 0; i < tex.width * tex.height; ++i) {
           auto c = pal.GetColor(tex.data[i]);
           td.data[i * 4 + 0] = c.rgba[0];
           td.data[i * 4 + 1] = c.rgba[1];
           td.data[i * 4 + 2] = c.rgba[2];
           td.data[i * 4 + 3] = 255;
+          td.emission[i * 4 + 3] = 255;
+          if (!sky && wad::Palette::IsFullbright(tex.data[i])) {
+            std::copy(c.rgba, c.rgba + 3, td.emission.begin() + i * 4);
+            emissive = true;
+          }
         }
+        if (!emissive)
+          td.emission.clear();
         return td;
       }
     }
@@ -171,23 +187,26 @@ namespace quakelib {
 
   std::optional<TextureData> QBspProvider::GetLightmapData() const {
     const auto *lm = m_bsp->LightMap();
-    if (!lm)
+    if (!lm || lm->Layers().Empty())
       return std::nullopt;
 
     TextureData td;
-    td.width = lm->Width();
-    td.height = lm->Height();
-    const auto &rgba = lm->RGBA();
-    td.data.resize(rgba.size() * 4);
-
-    // Copy data
-    for (size_t i = 0; i < rgba.size(); ++i) {
-      td.data[i * 4 + 0] = rgba[i].rgba[0];
-      td.data[i * 4 + 1] = rgba[i].rgba[1];
-      td.data[i * 4 + 2] = rgba[i].rgba[2];
-      td.data[i * 4 + 3] = rgba[i].rgba[3];
-    }
+    td.width = lm->Layers().width;
+    td.height = lm->Layers().height;
+    td.data = m_composed;
     return td;
+  }
+
+  void QBspProvider::SetLightStyle(int style, const std::string &pattern) {
+    m_styles.SetStyle(style, pattern);
+  }
+
+  bool QBspProvider::UpdateLightStyles(double time) {
+    const auto *lm = m_bsp->LightMap();
+    if (!lm)
+      return false;
+    m_styles.Update(time, lm->Layers());
+    return m_styles.Recompose(lm->Layers(), m_composed);
   }
 
 } // namespace quakelib

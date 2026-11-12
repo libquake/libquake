@@ -1,0 +1,68 @@
+# Building a map
+
+A `.map` is loaded in two steps. `ParseMap` reads the text into a `MapDocument` (entities, brushes, faces).
+`BuildMap` turns the document into a `Level`.
+
+```cpp
+--8<-- "examples/build_map.cpp:parse"
+```
+
+Standard Quake and Valve 220 faces are detected per face, so mixed files work. Quake 2 surface flags are
+read and ignored. Quake 3 and Doom 3 brush formats are rejected with an error.
+
+The document is useful on its own: `doc.textures` lists every texture in order of first use and `doc.wads`
+the wads from the worldspawn, enough to load the textures before building.
+
+## Texture sizes
+
+Texture coordinates depend on the texture size, which the map file does not store. `BuildMap` asks for it
+through `textureSize`. Unknown textures get uv 0.
+
+```cpp
+--8<-- "examples/build_map.cpp:wads"
+
+--8<-- "examples/build_map.cpp:build"
+```
+
+`level.textures` of a built map has names and the sizes returned here, no pixels.
+
+## Options
+
+| `MapBuildOptions` | Default | |
+|---|---|---|
+| `csg` | `true` | remove faces hidden inside other brushes of the same entity |
+| `convertToOpenGL` | `false` | y up, applied at the end |
+| `textureSize` | none | see above |
+| `faceTypes` | empty | surface type by texture name, on top of `DefaultSurfaceType` |
+| `lightmapUV` | planar, 16 units per luxel | how `lightmap_uv` is made, see [Lighting](lighting.md#lightmap-uvs) |
+| `bake` | `false` | bake the map lights into `level.lightmap` |
+| `bakeOptions` | from worldspawn | overrides the worldspawn light settings |
+| `extraLights` | empty | lights baked in addition to the map's own |
+| `extraOccluders` | empty | extra shadow casting triangles |
+
+Texture names in `faceTypes` are matched without path and case, so `"clip"` also covers `"tools/CLIP"`.
+
+## Collision hulls
+
+Every brush becomes one convex hull with its own points and triangles.
+
+```cpp
+--8<-- "examples/build_map.cpp:hulls"
+```
+
+| Type | Brush |
+|---|---|
+| `Solid` | everything else |
+| `Clip` | only `CLIP` faces (`clip`, `trigger` or your own `faceTypes`) |
+| `Liquid` | a texture starting with `*` |
+
+Brushes made only of `hint`, `hintskip` and `origin` get no hull. A trigger brush is a `Clip` hull, use
+the entity's classname to decide what it does.
+
+## Brush entities
+
+Each brush entity gets its own `EntityGeometry` in world coordinates with a zero pivot. Origin brushes
+are not evaluated yet.
+
+CSG only removes faces between brushes of the same entity. `func_group` and `func_detail` are separate
+entities and are not merged with the world.

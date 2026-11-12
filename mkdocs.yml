@@ -1,5 +1,5 @@
-site_name: LibQuake
-site_description: Documentation for LibQuake - A C++ library for Quake formats
+site_name: libquake
+site_description: C++ library for Quake 1 map, bsp and wad files
 site_author: Tino Gohlert
 repo_url: https://github.com/QuakeKit/libquake
 repo_name: QuakeKit/libquake
@@ -8,16 +8,14 @@ docs_dir: docs
 
 theme:
   name: material
+  variant: modern
   palette:
-    # Palette toggle for dark mode (Default)
     - scheme: slate
       primary: black
       accent: deep purple
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
-
-    # Palette toggle for light mode
     - scheme: default
       primary: black
       accent: deep purple
@@ -29,36 +27,39 @@ theme:
     - navigation.sections
     - navigation.expand
     - search.highlight
-    - search.share
     - content.code.copy
 
+nav:
+  - Home: index.md
+  - Guide:
+      - Getting started: guide/getting-started.md
+      - Loading a bsp: guide/bsp.md
+      - Building a map: guide/map.md
+      - Lighting: guide/lighting.md
+      - Textures: guide/textures.md
+      - C API: guide/c-api.md
+  - Reference:
+      - Level: reference/level.md
+      - Loading: reference/loading.md
+      - Lighting: reference/lighting.md
+      - Wad: reference/wad.md
+      - C API: reference/c-api.md
+  - qviewer: tools/qviewer.md
+
 plugins:
-  - mkdoxy:
-      projects:
-        libquake:
-          src-dirs: include/quakelib
-          full-doc: False
-          doxy-cfg:
-            FILE_PATTERNS: "*.h *.hpp"
-            RECURSIVE: True
-            STRIP_FROM_PATH: include/quakelib
-            STRIP_FROM_INC_PATH: include
   - search
-  - awesome-pages
 
 markdown_extensions:
   - admonition
-  - pymdownx.details
+  - def_list
+  - tables
   - pymdownx.superfences
-  - pymdownx.highlight:
-      anchor_linenums: true
+  - pymdownx.highlight
   - pymdownx.inlinehilite
-  - pymdownx.snippets
-  - pymdownx.arithmatex:
-      generic: true
+  - pymdownx.snippets:
+      # examples/ is compiled with QLIB_BUILD_EXAMPLES, the guide includes it from there
+      base_path: ["."]
+      check_paths: true
+      dedent_subsections: true
   - toc:
       permalink: true
-
-extra_javascript:
-  - https://polyfill.io/v3/polyfill.min.js?features=es6
-  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js

@@ -11,7 +11,8 @@ CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
 build/
-site/docs_gen/doxygen_output/
+site/
 .vscode
 learning/
 .DS_Store
+data

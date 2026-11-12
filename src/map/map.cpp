@@ -19,6 +19,13 @@ namespace quakelib::map {
     }
   }
 
+  void QMap::LoadDocument(const MapDocument &doc) {
+    m_map_file = std::make_shared<QMapFile>();
+    m_map_file->Load(doc);
+    m_textureIDTypes.clear();
+    m_textureIDBounds.clear();
+  }
+
   void QMap::RegisterTextureBounds(getTextureBoundsCb getTextureBounds) {
     if (getTextureBounds != nullptr && m_map_file) {
       for (int i = 0; i < m_map_file->m_textures.size(); i++) {
@@ -54,17 +61,18 @@ namespace quakelib::map {
     if (m_map_file == nullptr)
       return;
 
-    std::string lower = texture;
-    std::string upper = texture;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-    std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+    // exact, case insensitive match on the name without path, "common/clip" matches "clip"
+    auto baseLower = [](const std::string &name) {
+      auto pos = name.find_last_of("/\\");
+      std::string b = pos == std::string::npos ? name : name.substr(pos + 1);
+      std::transform(b.begin(), b.end(), b.begin(), ::tolower);
+      return b;
+    };
+    const std::string wanted = baseLower(texture);
 
-    for (int i = 0; i < m_map_file->m_textures.size(); i++) {
-      const auto &texName = m_map_file->m_textures[i];
-      if (texName == lower || texName == upper || texName.find(lower) != std::string::npos ||
-          texName.find(upper) != std::string::npos) {
+    for (int i = 0; i < (int)m_map_file->m_textures.size(); i++) {
+      if (baseLower(m_map_file->m_textures[i]) == wanted) {
         this->m_textureIDTypes[i] = type;
-        return;
       }
     }
   }

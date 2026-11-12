@@ -3,14 +3,20 @@ add_library(${PROJECT_NAME} SHARED
         common/vertex.cpp
         common/entity.cpp
         common/entity_parser.cpp
+        common/level.cpp
+        common/level_util.cpp
+        common/lightmap_layout.cpp
+        common/lightmap_baker.cpp
 
         bsp/qbsp.cpp
         bsp/qbsp_provider.cpp
         bsp/entity_solid.cpp
         bsp/surface.cpp
         bsp/lightmap.cpp
+        bsp/bsp_level.cpp
 
         map/map_file.cpp
+        map/map_document.cpp
         map/map.cpp
         map/brush.cpp
         map/face.cpp
@@ -18,6 +24,8 @@ add_library(${PROJECT_NAME} SHARED
         map/csg.cpp
         map/lightmap_generator.cpp
         map/qmap_provider.cpp
+        map/map_mesh.cpp
+        map/map_level.cpp
 
         wad/palette.cpp
         wad/wad.cpp
@@ -30,3 +38,6 @@ add_library(${PROJECT_NAME} SHARED
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC "../include/")
+
+find_package(Threads REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)

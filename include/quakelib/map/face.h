@@ -54,13 +54,13 @@ namespace quakelib::map {
      * @param textureID ID of the texture relative to the map.
      * @param uv Standard UV projection data.
      * @param rotation Texture rotation in degrees.
-     * @param scaleX Texture scale on X axis.
-     * @param scaleY Texture scale on Y axis.
+     * @param scaleX Texture scale on X axis, 0 is treated as 1 like the Quake tools do.
+     * @param scaleY Texture scale on Y axis, 0 is treated as 1 like the Quake tools do.
      */
     MapSurface(const std::array<Vec3, 3> &points, int textureID, StandardUV uv, float rotation, float scaleX,
                float scaleY)
         : m_planePoints(points), m_standardUV(uv), m_textureID(textureID), m_rotation(rotation),
-          m_scaleX(scaleX), m_scaleY(scaleY) {
+          m_scaleX(scaleX == 0 ? 1 : scaleX), m_scaleY(scaleY == 0 ? 1 : scaleY) {
       initPlane();
     };
 
@@ -76,7 +76,7 @@ namespace quakelib::map {
     MapSurface(const std::array<Vec3, 3> &points, int textureID, ValveUV uv, float rotation, float scaleX,
                float scaleY)
         : m_planePoints(points), m_valveUV(uv), m_textureID(textureID), m_rotation(rotation),
-          m_scaleX(scaleX), m_scaleY(scaleY), m_hasValveUV(true) {
+          m_scaleX(scaleX == 0 ? 1 : scaleX), m_scaleY(scaleY == 0 ? 1 : scaleY), m_hasValveUV(true) {
       initPlane();
     };
 
@@ -157,27 +157,28 @@ namespace quakelib::map {
     bool operator==(const MapSurface &arg_) const;
 
   private:
-    Vec4 CalcTangent() { return m_hasValveUV ? calcValveTangent() : calcStandardTangent(); };
+    Vec4 CalcTangent();
 
     Vec2 CalcUV(Vec3 vertex, float texW, float texH) {
       return m_hasValveUV ? calcValveUV(vertex, texW, texH) : calcStandardUV(vertex, texW, texH);
     };
 
     void initPlane();
-    Vec4 calcStandardTangent();
-    Vec4 calcValveTangent();
+    void setPlanePoints(const std::array<DVec3, 3> &points);
+    int standardAxis() const;
     Vec2 calcStandardUV(Vec3 vertex, float texW, float texH);
     Vec2 calcValveUV(Vec3 vertex, float texW, float texH);
     Vec2 calcStandardLightmapUV(Vec3 vertex);
     Vec2 calcValveLightmapUV(Vec3 vertex);
     Vec3 calcWorldFromStandardLightmapUV(Vec2 uv);
     Vec3 calcWorldFromValveLightmapUV(Vec2 uv);
-    bool getIntersection(const Vec3 &start, const Vec3 &end, Vec3 &out_intersectionPt, float &out_percentage);
-    std::pair<FacePtr, FacePtr> splitFace(const MapSurface *other);
 
     std::array<Vec3, 3> m_planePoints{};
+    std::array<DVec3, 3> m_planePointsD{};
     Vec3 m_planeNormal{};
     float m_planeDist{};
+    DVec3 m_planeNormalD{};
+    double m_planeDistD{};
     StandardUV m_standardUV{};
     ValveUV m_valveUV{};
     int m_textureID{};
@@ -189,6 +190,7 @@ namespace quakelib::map {
 
     friend class Brush;
     friend class QMap;
+    friend class QMapFile;
     friend class SolidMapEntity;
   };
 } // namespace quakelib::map
