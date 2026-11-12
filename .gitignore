@@ -15,4 +15,4 @@ site/
 .vscode
 learning/
 .DS_Store
-data
+/data/

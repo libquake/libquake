@@ -1,0 +1,37 @@
+// baker test: floor, a pillar, a static light, an animated light and a switchable light
+{
+"classname" "worldspawn"
+{
+( 0 0 0 ) ( 0 1 0 ) ( 0 0 1 ) ground1 0 0 0 1 1
+( 1024 0 0 ) ( 1024 0 1 ) ( 1024 1 0 ) ground1 0 0 0 1 1
+( 0 0 0 ) ( 0 0 1 ) ( 1 0 0 ) ground1 0 0 0 1 1
+( 0 512 0 ) ( 1 512 0 ) ( 0 512 1 ) ground1 0 0 0 1 1
+( 0 0 -16 ) ( 1 0 -16 ) ( 0 1 -16 ) ground1 0 0 0 1 1
+( 0 0 0 ) ( 0 1 0 ) ( 1 0 0 ) ground1 0 0 0 1 1
+}
+{
+( 320 0 0 ) ( 320 1 0 ) ( 320 0 1 ) ground1 0 0 0 1 1
+( 352 0 0 ) ( 352 0 1 ) ( 352 1 0 ) ground1 0 0 0 1 1
+( 0 240 0 ) ( 0 240 1 ) ( 1 240 0 ) ground1 0 0 0 1 1
+( 0 272 0 ) ( 1 272 0 ) ( 0 272 1 ) ground1 0 0 0 1 1
+( 0 0 0 ) ( 1 0 0 ) ( 0 1 0 ) ground1 0 0 0 1 1
+( 0 0 256 ) ( 0 1 256 ) ( 1 0 256 ) ground1 0 0 0 1 1
+}
+}
+{
+"classname" "light"
+"origin" "256 256 128"
+"light" "300"
+}
+{
+"classname" "light"
+"origin" "800 256 64"
+"light" "200"
+"style" "5"
+}
+{
+"classname" "light"
+"origin" "800 64 64"
+"light" "200"
+"targetname" "lamp"
+}
