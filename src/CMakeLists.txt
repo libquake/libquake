@@ -7,6 +7,7 @@ add_library(${PROJECT_NAME} SHARED
         common/level_util.cpp
         common/lightmap_layout.cpp
         common/lightmap_baker.cpp
+        common/texture_name.cpp
 
         bsp/qbsp.cpp
         bsp/qbsp_provider.cpp

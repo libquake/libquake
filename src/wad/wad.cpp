@@ -15,11 +15,6 @@ namespace quakelib::wad {
     return s;
   }
 
-  bool QuakeWad::IsSkyTexture(const std::string texname) {
-    // the engine only checks the prefix
-    return to_lower(texname).rfind("sky", 0) == 0;
-  }
-
   QuakeWadPtr QuakeWad::FromFile(const std::string &fileName, QuakeWadOptions opts) {
     auto w = std::make_shared<QuakeWad>();
     w->opts = opts;
@@ -43,6 +38,7 @@ namespace quakelib::wad {
       w->m_istream.read(name, TEXTURE_NAME_LENGTH);
       we.name = std::string(name);
       w->m_entries[we.name] = we;
+      w->m_lowerNames.emplace(to_lower(we.name), we.name);
     }
     return w;
   }
@@ -52,11 +48,17 @@ namespace quakelib::wad {
       m_istream.close();
   }
 
-  QuakeTexture *QuakeWad::GetTexture(const std::string &textureName) {
-    if (m_entries.find(textureName) == m_entries.end())
-      return nullptr;
-
-    auto &qwe = m_entries[textureName];
+  QuakeTexture *QuakeWad::GetTexture(const std::string &name) {
+    // names are matched case insensitive like the engine, an exact match wins
+    auto entry = m_entries.find(name);
+    if (entry == m_entries.end()) {
+      auto lower = m_lowerNames.find(to_lower(name));
+      if (lower == m_lowerNames.end())
+        return nullptr;
+      entry = m_entries.find(lower->second);
+    }
+    const std::string &textureName = entry->first;
+    auto &qwe = entry->second;
 
     if (qwe.texture.raw.size() == 0) {
       m_istream.seekg(qwe.header.offset + TEXTURE_NAME_LENGTH, m_istream.beg);
@@ -68,7 +70,7 @@ namespace quakelib::wad {
 
       // FromBuffer allocates with new, so we need to copy and delete
       QuakeTexture *temp =
-          FromBuffer(buff.data(), IsSkyTexture(textureName), qwe.texture.width, qwe.texture.height);
+          FromBuffer(buff.data(), ClassifyTexture(textureName), qwe.texture.width, qwe.texture.height);
       qwe.texture = *temp;
       delete temp;
     }
@@ -76,13 +78,14 @@ namespace quakelib::wad {
     return &qwe.texture;
   }
 
-  QuakeTexture *QuakeWad::FromBuffer(const uint8_t *buff, bool isSky, int width, int height) {
+  QuakeTexture *QuakeWad::FromBuffer(const uint8_t *buff, uint32_t flags, int width, int height) {
     QuakeTexture *qtex;
-    if (isSky) {
+    if (flags & TEXTURE_SKY) {
       qtex = new QuakeSkyTexture();
     } else {
       qtex = new QuakeTexture();
     }
+    qtex->hasAlpha = (flags & TEXTURE_ALPHA) != 0;
     qtex->width = width;
     qtex->height = height;
     qtex->FillTextureData(buff, width * height, opts.flipTexHorizontal, m_pal);

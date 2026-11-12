@@ -41,9 +41,6 @@ namespace quakelib::wad {
         if (IsFullbright(col_i)) {
           p.m_brightColors.push_back(p.m_colors[col_i]);
         }
-        if (col_i == 255) {
-          p.m_colors[col_i].rgba[3] = 0;
-        }
         col_i++;
       }
 

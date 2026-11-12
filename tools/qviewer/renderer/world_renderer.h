@@ -1,7 +1,10 @@
 #pragma once
 
 #include "../view_settings.h"
+#include "shader_library.h"
+#include <array>
 #include <raylib.h>
+#include <utility>
 #include <vector>
 
 /**
@@ -9,7 +12,8 @@
  */
 class WorldRenderer {
 public:
-  /// loads world.vert/.frag and sky.frag, keeps the current shaders if the new ones do not compile
+  /// loads world.vert/.frag (plain and with ALPHA_TEST) and sky.frag, keeps the current shaders if the new
+  /// ones do not compile
   bool LoadShaders(bool fromDisk);
   /// call before CloseWindow
   void Unload();
@@ -20,9 +24,7 @@ public:
   /// x-ray lines on top of everything
   void DrawWireframe(const std::vector<Model> &models);
 
-  Shader WorldShader() const { return world; }
-
-  Shader SkyShader() const { return sky; }
+  const SurfaceShaders &Shaders() const { return shaders; }
 
 private:
   struct Locations {
@@ -35,9 +37,10 @@ private:
   };
 
   void setWireframe(bool on);
+  std::array<std::pair<Shader, Locations *>, 3> all();
 
-  Shader world{};
-  Shader sky{};
+  SurfaceShaders shaders;
   Locations worldLoc;
+  Locations alphaLoc;
   Locations skyLoc;
 };

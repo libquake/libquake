@@ -1,8 +1,47 @@
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <quakelib/wad/wad.h>
 #include <quakelib/wad/wad_manager.h>
 #include <snitch/snitch.hpp>
 
 using namespace quakelib::wad;
+
+namespace {
+  // writes a WAD2 with 4x4 mip textures, every pixel set to the given palette index
+  std::string writeTestWad(const std::string &file,
+                           const std::vector<std::pair<std::string, uint8_t>> &textures) {
+    auto path = (std::filesystem::temp_directory_path() / file).string();
+    std::vector<char> lumps;
+    std::vector<uint32_t> offsets;
+    for (const auto &[name, index] : textures) {
+      offsets.push_back(12 + (uint32_t)lumps.size());
+      char header[40] = {};
+      std::strncpy(header, name.c_str(), 16);
+      uint32_t fields[6] = {4, 4, 40, 40 + 16, 40 + 20, 40 + 21};
+      std::memcpy(header + 16, fields, sizeof(fields));
+      lumps.insert(lumps.end(), header, header + 40);
+      lumps.insert(lumps.end(), 16 + 4 + 1 + 1, (char)index);
+    }
+    std::ofstream out(path, std::ios::binary);
+    uint32_t count = (uint32_t)textures.size(), dir = 12 + (uint32_t)lumps.size();
+    out.write("WAD2", 4);
+    out.write((const char *)&count, 4);
+    out.write((const char *)&dir, 4);
+    out.write(lumps.data(), (std::streamsize)lumps.size());
+    for (size_t i = 0; i < textures.size(); i++) {
+      char entry[32] = {};
+      uint32_t size = 40 + 22;
+      std::memcpy(entry, &offsets[i], 4);
+      std::memcpy(entry + 4, &size, 4);
+      std::memcpy(entry + 8, &size, 4);
+      entry[12] = QuakeWadEntry::QWET_MipsTexture;
+      std::strncpy(entry + 16, textures[i].first.c_str(), 16);
+      out.write(entry, 32);
+    }
+    return path;
+  }
+} // namespace
 
 TEST_CASE("WAD - Load file", "[wad]") {
   const char *wadPath = "tests/data/prototype.wad";
@@ -124,6 +163,55 @@ TEST_CASE("WAD - Sky texture detection", "[wad]") {
   CHECK(QuakeWad::IsSkyTexture("128_blue_3") == false);
 }
 
+TEST_CASE("WAD - case insensitive lookup", "[wad]") {
+  auto wad = QuakeWad::FromFile("tests/data/prototype.wad", QuakeWadOptions());
+  REQUIRE(wad != nullptr);
+  auto *exact = wad->GetTexture("text_A");
+  REQUIRE(exact != nullptr);
+  CHECK(wad->GetTexture("TEXT_a") == exact);
+  CHECK(wad->GetTexture("text_a") == exact);
+  CHECK(wad->GetTexture("SKY1") == wad->GetTexture("sky1"));
+  CHECK(wad->GetTexture("text_") == nullptr);
+}
+
+TEST_CASE("WAD - alpha only on '{' textures", "[wad]") {
+  REQUIRE(quakelib::ClassifyTexture("{fence") == quakelib::TEXTURE_ALPHA);
+  REQUIRE(quakelib::ClassifyTexture("*water1") == quakelib::TEXTURE_LIQUID);
+  REQUIRE(quakelib::ClassifyTexture("common/SKY4") == quakelib::TEXTURE_SKY);
+  REQUIRE(quakelib::ClassifyTexture("metal{1") == 0);
+  REQUIRE(quakelib::ClassifyTexture("") == 0);
+
+  auto path = writeTestWad("quakelib_alpha_test.wad", {{"{fence", 255}, {"opaque", 255}, {"{solid", 7}});
+  auto wad = QuakeWad::FromFile(path, QuakeWadOptions());
+  REQUIRE(wad != nullptr);
+
+  auto *fence = wad->GetTexture("{fence");
+  REQUIRE(fence != nullptr);
+  REQUIRE(fence->hasAlpha);
+  REQUIRE(fence->raw.size() == 16);
+  for (const auto &c : fence->raw) {
+    REQUIRE(c.rgba[3] == 0);
+    REQUIRE((c.rgba[0] | c.rgba[1] | c.rgba[2]) == 0);
+  }
+
+  // index 255 is an ordinary color everywhere else
+  auto *opaque = wad->GetTexture("opaque");
+  REQUIRE(opaque != nullptr);
+  REQUIRE_FALSE(opaque->hasAlpha);
+  for (const auto &c : opaque->raw)
+    REQUIRE(c.rgba[3] == 255);
+
+  auto *solid = wad->GetTexture("{solid");
+  REQUIRE(solid != nullptr);
+  REQUIRE(solid->hasAlpha);
+  for (const auto &c : solid->raw)
+    REQUIRE(c.rgba[3] == 255);
+
+  REQUIRE(default_palette.GetColor(255).rgba[3] == 255);
+  wad.reset();
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("WAD - Invalid file", "[wad]") {
   auto wad = QuakeWad::FromFile("nonexistent.wad");
   CHECK(wad == nullptr);
@@ -201,8 +289,9 @@ TEST_CASE("WAD - manager folders and lookup", "[wad]") {
   REQUIRE(QuakeWadManager::FindWadFile("start.wad", {"tests/data"}).empty());
 
   QuakeWadManager mgr;
-  REQUIRE(mgr.AddWadDirectory("tests/data") == 1);
-  REQUIRE(mgr.LoadedFiles().size() == 1);
+  // prototype.wad and sky_alpha.wad
+  REQUIRE(mgr.AddWadDirectory("tests/data") == 2);
+  REQUIRE(mgr.LoadedFiles().size() == 2);
   // the same file again, by folder or by path, is not loaded twice
   REQUIRE(mgr.AddWadDirectory("tests/data") == 0);
   REQUIRE_FALSE(mgr.AddWadFile(path));

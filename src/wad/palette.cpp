@@ -13,4 +13,4 @@ namespace quakelib::wad {
     return m_colors[index];
   }
 
-}
+} // namespace quakelib::wad

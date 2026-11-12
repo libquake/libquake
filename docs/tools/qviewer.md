@@ -49,7 +49,7 @@ also read from the source folder on F5, so changes show up without a restart.
 
 | File | |
 |---|---|
-| `world.vert` / `world.frag` | lightmap, fullbright pixels, fog |
+| `world.vert` / `world.frag` | lightmap, fullbright pixels, fog. Compiled a second time with `ALPHA_TEST` for `{` textures |
 | `sky.frag` | Quake's two layer scrolling sky |
 | `bloom_extract.frag`, `bloom_blur.frag`, `bloom_composite.frag` | bloom on fullbright pixels and overbright light |
 

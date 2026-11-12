@@ -74,6 +74,7 @@ namespace quakelib {
     for (const auto &name : textures) {
       TextureInfo info;
       info.name = name;
+      info.hasAlpha = IsAlphaTexture(name);
       if (options.textureSize) {
         auto [w, h] = options.textureSize(name);
         info.width = w;

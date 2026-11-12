@@ -4,6 +4,7 @@
 #include <quakelib/bsp/bsp_level.h>
 #include <quakelib/bsp/qbsp.h>
 #include <quakelib/entity_parser.h>
+#include <quakelib/wad/wad.h>
 #include <snitch/snitch.hpp>
 
 using namespace quakelib;
@@ -218,4 +219,70 @@ TEST_CASE("bsp texture emission", "[bsp/level]") {
 
   REQUIRE_FALSE(level.textures[blue].hasEmission);
   REQUIRE(level.textures[blue].emission.empty());
+}
+
+TEST_CASE("bsp sky layers and alpha", "[bsp/level]") {
+  // tests/data/sky_alpha.map: sky1 ceiling, {fence func_wall, compiled with ericw qbsp
+  Level level = LoadBsp("tests/data/sky_alpha.bsp");
+  int skyIndex = level.FindTexture("sky1");
+  int fenceIndex = level.FindTexture("{fence");
+  int wallIndex = level.FindTexture("128_blue_3");
+  REQUIRE(skyIndex >= 0);
+  REQUIRE(fenceIndex >= 0);
+  REQUIRE(wallIndex >= 0);
+
+  // split like the wad loader, the layers match prototype.wad pixel for pixel
+  const auto &sky = level.textures[skyIndex];
+  REQUIRE(sky.width == 128);
+  REQUIRE(sky.height == 128);
+  REQUIRE(sky.rgba.size() == 128 * 128 * 4);
+  REQUIRE(sky.skyFront.size() == sky.rgba.size());
+  REQUIRE_FALSE(sky.hasEmission);
+  REQUIRE_FALSE(sky.hasAlpha);
+
+  wad::QuakeWadOptions opts;
+  opts.flipTexHorizontal = false;
+  auto wad = wad::QuakeWad::FromFile("tests/data/prototype.wad", opts);
+  REQUIRE(wad != nullptr);
+  auto *wadSky = wad->GetTexture("sky1");
+  REQUIRE(wadSky != nullptr);
+  REQUIRE(wadSky->raw.size() == 128 * 128);
+  size_t clear = 0;
+  for (size_t i = 0; i < wadSky->raw.size(); i++) {
+    for (int k = 0; k < 4; k++) {
+      REQUIRE(sky.rgba[i * 4 + k] == wadSky->raw[i].rgba[k]);
+      REQUIRE(sky.skyFront[i * 4 + k] == wadSky->front[i].rgba[k]);
+    }
+    clear += sky.skyFront[i * 4 + 3] == 0;
+  }
+  REQUIRE(clear > 0);
+  REQUIRE(clear < wadSky->raw.size());
+
+  // texture coordinates keep the miptex width
+  bool skyMesh = false;
+  for (const auto &m : level.geometry[0].meshes) {
+    if (m.textureName == "sky1") {
+      skyMesh = true;
+      REQUIRE(m.textureWidth == 256);
+    }
+  }
+  REQUIRE(skyMesh);
+
+  // {fence: bars every 16 pixels, index 255 in between
+  const auto &fence = level.textures[fenceIndex];
+  REQUIRE(fence.hasAlpha);
+  REQUIRE(fence.skyFront.empty());
+  size_t holes = 0;
+  for (size_t i = 0; i < fence.rgba.size(); i += 4) {
+    if (fence.rgba[i + 3] == 0) {
+      holes++;
+      REQUIRE((fence.rgba[i] | fence.rgba[i + 1] | fence.rgba[i + 2]) == 0);
+    } else {
+      REQUIRE(fence.rgba[i + 3] == 255);
+    }
+  }
+  REQUIRE(holes == 48 * 48);
+
+  REQUIRE_FALSE(level.textures[wallIndex].hasAlpha);
+  REQUIRE(level.textures[wallIndex].skyFront.empty());
 }

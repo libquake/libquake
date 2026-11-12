@@ -83,7 +83,7 @@ bool Viewer::Load(const std::string &file, const LoadOptions &options) {
 
   lightmap.Load(level.lightmap);
   models = BuildLevelModels(level);
-  textures.Build(level, renderer.WorldShader(), renderer.SkyShader(), lightmap.Texture());
+  textures.Build(level, renderer.Shaders(), lightmap.Texture());
   for (auto &m : models) {
     m.materials = textures.Materials();
     m.materialCount = textures.Count();
@@ -111,7 +111,7 @@ void Viewer::reloadShaders() {
   bool world = renderer.LoadShaders(true);
   bool post = bloom.LoadShaders(true);
   SetTraceLogLevel(LOG_ERROR);
-  textures.SetShaders(renderer.WorldShader(), renderer.SkyShader());
+  textures.SetShaders(renderer.Shaders());
   std::cout << "shaders reloaded: world " << (world ? "ok" : "failed") << ", bloom "
             << (post ? "ok" : "failed") << std::endl;
 }

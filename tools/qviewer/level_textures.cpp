@@ -1,19 +1,10 @@
 #include "level_textures.h"
 
-#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
 
 namespace {
-  // wad entries are stored lower case
-  std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return (char)std::tolower(c); });
-    return s;
-  }
-
-  bool isSkyName(const std::string &name) { return lower(name).rfind("sky", 0) == 0; }
-
   Image imageFromRGBA(const uint8_t *rgba, int width, int height) {
     size_t size = (size_t)width * height * 4;
     Image img{MemAlloc((unsigned int)size), width, height, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
@@ -63,7 +54,7 @@ void LevelTextures::LoadWads(const std::vector<std::string> &named, const std::v
 }
 
 std::pair<int, int> LevelTextures::Size(const std::string &name) {
-  if (auto *qt = wads.FindTexture(lower(name)))
+  if (auto *qt = wads.FindTexture(name))
     return {(int)qt->width, (int)qt->height};
   return {0, 0};
 }
@@ -71,33 +62,17 @@ std::pair<int, int> LevelTextures::Size(const std::string &name) {
 bool LevelTextures::fromLevel(const quakelib::TextureInfo &info, Images &out) {
   if (info.rgba.empty())
     return false;
-  if (!isSkyName(info.name) || info.width < 2) {
-    out.albedo = imageFromRGBA(info.rgba.data(), info.width, info.height);
-    if (info.hasEmission)
-      out.emission = imageFromRGBA(info.emission.data(), info.width, info.height);
-    return true;
-  }
-
-  // bsp skies are stored whole: left half front layer (black is transparent), right half back layer
-  const int w = info.width / 2, h = info.height;
-  std::vector<uint8_t> front((size_t)w * h * 4), back((size_t)w * h * 4);
-  for (int y = 0; y < h; y++) {
-    for (int x = 0; x < w; x++) {
-      const uint8_t *f = &info.rgba[((size_t)y * info.width + x) * 4];
-      const uint8_t *b = &info.rgba[((size_t)y * info.width + w + x) * 4];
-      uint8_t *fo = &front[((size_t)y * w + x) * 4];
-      std::memcpy(fo, f, 4);
-      fo[3] = (f[0] | f[1] | f[2]) ? 255 : 0;
-      std::memcpy(&back[((size_t)y * w + x) * 4], b, 4);
-    }
-  }
-  out.albedo = imageFromRGBA(back.data(), w, h);
-  out.skyFront = imageFromRGBA(front.data(), w, h);
+  // sky textures arrive split, rgba is the back layer
+  out.albedo = imageFromRGBA(info.rgba.data(), info.width, info.height);
+  if (!info.skyFront.empty())
+    out.skyFront = imageFromRGBA(info.skyFront.data(), info.width, info.height);
+  if (info.hasEmission)
+    out.emission = imageFromRGBA(info.emission.data(), info.width, info.height);
   return true;
 }
 
 bool LevelTextures::fromWad(const std::string &name, Images &out) {
-  auto *qt = wads.FindTexture(lower(name));
+  auto *qt = wads.FindTexture(name);
   if (!qt || qt->raw.empty())
     return false;
   // wad skies are already split, raw is the back layer
@@ -121,8 +96,18 @@ Texture2D LevelTextures::upload(Image &img, bool mipmaps) {
   return tex;
 }
 
-void LevelTextures::Build(const quakelib::Level &level, Shader worldShader, Shader skyShader,
-                          Texture2D lightmap) {
+Shader LevelTextures::shaderFor(Kind kind, const SurfaceShaders &shaders) {
+  switch (kind) {
+  case Kind::Alpha:
+    return shaders.alpha;
+  case Kind::Sky:
+    return shaders.sky;
+  default:
+    return shaders.world;
+  }
+}
+
+void LevelTextures::Build(const quakelib::Level &level, const SurfaceShaders &shaders, Texture2D lightmap) {
   Unload();
   black = singleTexel(BLACK);
   transparent = singleTexel(BLANK);
@@ -137,13 +122,12 @@ void LevelTextures::Build(const quakelib::Level &level, Shader worldShader, Shad
     }
 
     Material mat = LoadMaterialDefault();
-    const bool sky = isSkyName(info.name);
-    if (sky) {
-      mat.shader = skyShader;
+    Kind kind = quakelib::IsSkyTexture(info.name) ? Kind::Sky : info.hasAlpha ? Kind::Alpha : Kind::World;
+    mat.shader = shaderFor(kind, shaders);
+    if (kind == Kind::Sky) {
       mat.maps[0].texture = upload(img.albedo, false);
       mat.maps[1].texture = img.skyFront.data ? upload(img.skyFront, false) : transparent;
     } else {
-      mat.shader = worldShader;
       mat.maps[0].texture = upload(img.albedo, true);
       mat.maps[1].texture = lightmap;
       mat.maps[2].texture = img.emission.data ? upload(img.emission, true) : black;
@@ -151,13 +135,13 @@ void LevelTextures::Build(const quakelib::Level &level, Shader worldShader, Shad
     UnloadImage(img.emission); // no-ops when already uploaded or empty
     UnloadImage(img.skyFront);
     materials.push_back(mat);
-    isSky.push_back(sky);
+    kinds.push_back(kind);
   }
 }
 
-void LevelTextures::SetShaders(Shader worldShader, Shader skyShader) {
+void LevelTextures::SetShaders(const SurfaceShaders &shaders) {
   for (size_t i = 0; i < materials.size(); i++)
-    materials[i].shader = isSky[i] ? skyShader : worldShader;
+    materials[i].shader = shaderFor(kinds[i], shaders);
 }
 
 void LevelTextures::SetPointFiltering(bool point) {
@@ -179,7 +163,7 @@ void LevelTextures::Unload() {
     UnloadTexture(transparent);
   textures.clear();
   materials.clear();
-  isSky.clear();
+  kinds.clear();
   missing.clear();
   black = transparent = Texture2D{};
 }

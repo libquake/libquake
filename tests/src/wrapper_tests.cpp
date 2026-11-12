@@ -261,7 +261,96 @@ TEST_CASE("Wrapper API - bsp", "[wrapper][bsp]") {
   std::vector<uint8_t> px((size_t)info.width * info.height * 4);
   REQUIRE(QLibLevel_CopyLightmap(level, px.data(), (uint32_t)px.size()) == QLIB_OK);
 
+  // bsp lightmaps come per style too, layer 0 is style 0
+  REQUIRE(info.layerCount > 1);
+  REQUIRE(info.luxelSize == 0.0f);
+  int32_t style = -1;
+  REQUIRE(QLibLevel_CopyLightmapLayer(level, 0, px.data(), (uint32_t)px.size(), &style) == QLIB_OK);
+  REQUIRE(style == 0);
+  for (uint32_t l = 1; l < info.layerCount; l++) {
+    REQUIRE(QLibLevel_CopyLightmapLayer(level, l, px.data(), (uint32_t)px.size(), &style) == QLIB_OK);
+    REQUIRE(style > 0);
+  }
+  REQUIRE(QLibLevel_CopyLightmapLayer(level, info.layerCount, px.data(), (uint32_t)px.size(), &style) ==
+          QLIB_ERROR_INVALID_ARGUMENT);
+
   REQUIRE(QLibMap_SetTextureSize(level, "x", 1, 1) == QLIB_ERROR_INVALID_ARGUMENT);
+  QLibLevel_Destroy(level);
+}
+
+TEST_CASE("Wrapper API - bsp sky, alpha, entities", "[wrapper][bsp]") {
+  QLibBspOptions opts;
+  QLibBsp_GetDefaultOptions(&opts);
+  opts.convertToOpenGL = 1;
+  QLibLevel *level = nullptr;
+  REQUIRE(QLibBsp_Load("tests/data/sky_alpha.bsp", &opts, &level) == QLIB_OK);
+
+  REQUIRE(QLibLevel_GetRequiredWadCount(level) == 1);
+  REQUIRE(std::string(QLibLevel_GetRequiredWad(level, 0)) == "sky_alpha.wad");
+
+  // the sky arrives split, the back layer through the pixels
+  int32_t sky = -1, fence = -1;
+  for (uint32_t i = 0; i < QLibLevel_GetTextureCount(level); i++) {
+    auto name = textureName(level, (int32_t)i);
+    if (name == "sky1")
+      sky = (int32_t)i;
+    if (name == "{fence")
+      fence = (int32_t)i;
+  }
+  REQUIRE(sky >= 0);
+  REQUIRE(fence >= 0);
+  QLibTextureInfo info{};
+  REQUIRE(QLibLevel_GetTextureInfo(level, (uint32_t)sky, &info) == QLIB_OK);
+  REQUIRE(info.flags == (QLIB_TEXTURE_SKY | QLIB_TEXTURE_HAS_DATA | QLIB_TEXTURE_HAS_SKY_FRONT));
+  REQUIRE(info.width == 128);
+  REQUIRE(info.height == 128);
+  std::vector<uint8_t> px((size_t)info.width * info.height * 4);
+  REQUIRE(QLibLevel_CopyTextureLayer(level, (uint32_t)sky, QLIB_TEXTURE_LAYER_ALBEDO, px.data(),
+                                     (uint32_t)px.size()) == QLIB_OK);
+  REQUIRE(QLibLevel_CopyTextureLayer(level, (uint32_t)sky, QLIB_TEXTURE_LAYER_SKY_FRONT, px.data(),
+                                     (uint32_t)px.size()) == QLIB_OK);
+  REQUIRE(QLibLevel_CopyTextureLayer(level, (uint32_t)sky, QLIB_TEXTURE_LAYER_EMISSION, px.data(),
+                                     (uint32_t)px.size()) == QLIB_ERROR_INVALID_ARGUMENT);
+  REQUIRE(QLibLevel_CopyTextureLayer(level, (uint32_t)sky, 7, px.data(), (uint32_t)px.size()) ==
+          QLIB_ERROR_INVALID_ARGUMENT);
+  size_t clear = 0;
+  for (size_t i = 3; i < px.size(); i += 4)
+    clear += px[i] == 0;
+  REQUIRE(clear > 0);
+  REQUIRE(clear < px.size() / 4);
+
+  REQUIRE(QLibLevel_GetTextureInfo(level, (uint32_t)fence, &info) == QLIB_OK);
+  REQUIRE(info.flags == (QLIB_TEXTURE_ALPHA | QLIB_TEXTURE_HAS_DATA));
+  px.assign((size_t)info.width * info.height * 4, 255);
+  REQUIRE(QLibLevel_CopyTextureLayer(level, (uint32_t)fence, QLIB_TEXTURE_LAYER_ALBEDO, px.data(),
+                                     (uint32_t)px.size()) == QLIB_OK);
+  size_t holes = 0;
+  for (size_t i = 3; i < px.size(); i += 4)
+    holes += px[i] == 0;
+  REQUIRE(holes == 48 * 48);
+
+  // point entities keep all keys, the origin follows the geometry conversion
+  bool start = false;
+  for (uint32_t e = 0; e < QLibLevel_GetPointEntityCount(level); e++) {
+    QLibPointEntityInfo pinfo{};
+    REQUIRE(QLibLevel_GetPointEntityInfo(level, e, &pinfo) == QLIB_OK);
+    if (std::string(pinfo.className) != "info_player_start")
+      continue;
+    start = true;
+    REQUIRE(pinfo.origin.x == 0.0f);
+    REQUIRE(pinfo.origin.y == 24.0f);
+    REQUIRE(pinfo.origin.z == 96.0f);
+    REQUIRE(pinfo.angle == 90.0f);
+    REQUIRE(pinfo.attributeCount == 3);
+    const char *key = nullptr, *value = nullptr;
+    REQUIRE(QLibLevel_GetEntityAttribute(level, 0, e, 0, &key, &value) == QLIB_OK);
+    REQUIRE(std::string(key) == "classname");
+    REQUIRE(QLibLevel_GetEntityAttribute(level, 0, e, 2, &key, &value) == QLIB_OK);
+    REQUIRE(std::string(key) == "origin");
+    REQUIRE(std::string(value) == "0 -96 24");
+    REQUIRE(QLibLevel_GetEntityAttribute(level, 0, e, 3, &key, &value) == QLIB_ERROR_INVALID_ARGUMENT);
+  }
+  REQUIRE(start);
   QLibLevel_Destroy(level);
 }
 
@@ -275,37 +364,84 @@ TEST_CASE("Wrapper API - wad", "[wrapper][wad]") {
   REQUIRE(index >= 0);
   REQUIRE(QLibWad_FindTexture(wad, "not_a_texture") == -1);
 
+  int32_t capital = QLibWad_FindTexture(wad, "TEXT_a");
+  REQUIRE(capital >= 0);
+  QLibTextureInfo capitalInfo{};
+  REQUIRE(QLibWad_GetTextureInfo(wad, (uint32_t)capital, &capitalInfo) == QLIB_OK);
+  REQUIRE(std::string(capitalInfo.name) == "text_A");
+
   QLibTextureInfo info{};
   REQUIRE(QLibWad_GetTextureInfo(wad, (uint32_t)index, &info) == QLIB_OK);
   REQUIRE(std::string(info.name) == "128_blue_3");
   REQUIRE(info.width == 128);
   REQUIRE(info.height == 128);
-  REQUIRE(info.hasData == 1);
+  REQUIRE(info.flags == QLIB_TEXTURE_HAS_DATA);
 
   std::vector<uint8_t> px(info.width * info.height * 4);
-  REQUIRE(QLibWad_CopyTexturePixels(wad, (uint32_t)index, px.data(), 16) == QLIB_ERROR_BUFFER_TOO_SMALL);
-  REQUIRE(QLibWad_CopyTexturePixels(wad, (uint32_t)index, px.data(), (uint32_t)px.size()) == QLIB_OK);
+  REQUIRE(QLibWad_CopyTextureLayer(wad, (uint32_t)index, QLIB_TEXTURE_LAYER_ALBEDO, px.data(), 16) ==
+          QLIB_ERROR_BUFFER_TOO_SMALL);
+  REQUIRE(QLibWad_CopyTextureLayer(wad, (uint32_t)index, QLIB_TEXTURE_LAYER_ALBEDO, px.data(),
+                                   (uint32_t)px.size()) == QLIB_OK);
   bool nonBlack = false;
   for (size_t i = 0; i < px.size(); i += 4)
     nonBlack |= px[i] || px[i + 1] || px[i + 2];
   REQUIRE(nonBlack);
 
   // no fullbright pixels, no emission
-  REQUIRE(info.hasEmission == 0);
-  REQUIRE(QLibWad_CopyTextureEmission(wad, (uint32_t)index, px.data(), (uint32_t)px.size()) != QLIB_OK);
+  REQUIRE(QLibWad_CopyTextureLayer(wad, (uint32_t)index, QLIB_TEXTURE_LAYER_EMISSION, px.data(),
+                                   (uint32_t)px.size()) == QLIB_ERROR_INVALID_ARGUMENT);
 
   int32_t button = QLibWad_FindTexture(wad, "+0button_0");
   REQUIRE(button >= 0);
   REQUIRE(QLibWad_GetTextureInfo(wad, (uint32_t)button, &info) == QLIB_OK);
-  REQUIRE(info.hasEmission == 1);
+  REQUIRE(info.flags == (QLIB_TEXTURE_HAS_DATA | QLIB_TEXTURE_HAS_EMISSION));
   std::vector<uint8_t> emission(info.width * info.height * 4);
-  REQUIRE(QLibWad_CopyTextureEmission(wad, (uint32_t)button, emission.data(), 16) ==
+  REQUIRE(QLibWad_CopyTextureLayer(wad, (uint32_t)button, QLIB_TEXTURE_LAYER_EMISSION, emission.data(), 16) ==
           QLIB_ERROR_BUFFER_TOO_SMALL);
-  REQUIRE(QLibWad_CopyTextureEmission(wad, (uint32_t)button, emission.data(), (uint32_t)emission.size()) ==
-          QLIB_OK);
+  REQUIRE(QLibWad_CopyTextureLayer(wad, (uint32_t)button, QLIB_TEXTURE_LAYER_EMISSION, emission.data(),
+                                   (uint32_t)emission.size()) == QLIB_OK);
   size_t lit = 0;
   for (size_t i = 0; i < emission.size(); i += 4)
     lit += emission[i] || emission[i + 1] || emission[i + 2];
   REQUIRE(lit == 884);
+
+  int32_t water = QLibWad_FindTexture(wad, "*64_water1_1");
+  REQUIRE(water >= 0);
+  REQUIRE(QLibWad_GetTextureInfo(wad, (uint32_t)water, &info) == QLIB_OK);
+  REQUIRE(info.flags == (QLIB_TEXTURE_LIQUID | QLIB_TEXTURE_HAS_DATA));
   QLibWad_Destroy(wad);
+}
+
+TEST_CASE("Wrapper API - wad sky layers", "[wrapper][wad]") {
+  // sky1: 256x128 in the wad, two 128x128 layers. the flipped wad stores the same rows bottom up
+  QLibWad *wads[2] = {};
+  REQUIRE(QLibWad_Load("tests/data/prototype.wad", 0, &wads[0]) == QLIB_OK);
+  REQUIRE(QLibWad_Load("tests/data/prototype.wad", 1, &wads[1]) == QLIB_OK);
+  std::vector<uint8_t> layers[2][2];
+  for (int w = 0; w < 2; w++) {
+    int32_t sky = QLibWad_FindTexture(wads[w], "sky1");
+    REQUIRE(sky >= 0);
+    QLibTextureInfo info{};
+    REQUIRE(QLibWad_GetTextureInfo(wads[w], (uint32_t)sky, &info) == QLIB_OK);
+    REQUIRE(info.flags == (QLIB_TEXTURE_SKY | QLIB_TEXTURE_HAS_DATA | QLIB_TEXTURE_HAS_SKY_FRONT));
+    REQUIRE(info.width == 128);
+    REQUIRE(info.height == 128);
+    for (int l = 0; l < 2; l++) {
+      layers[w][l].resize(128 * 128 * 4);
+      uint32_t layer = l == 0 ? QLIB_TEXTURE_LAYER_ALBEDO : QLIB_TEXTURE_LAYER_SKY_FRONT;
+      REQUIRE(QLibWad_CopyTextureLayer(wads[w], (uint32_t)sky, layer, layers[w][l].data(),
+                                       (uint32_t)layers[w][l].size()) == QLIB_OK);
+    }
+  }
+  size_t clear = 0;
+  for (size_t i = 3; i < layers[0][1].size(); i += 4)
+    clear += layers[0][1][i] == 0;
+  REQUIRE(clear > 0);
+  REQUIRE(clear < 128 * 128);
+  for (int l = 0; l < 2; l++) {
+    for (int row = 0; row < 128; row++)
+      REQUIRE(std::memcmp(&layers[0][l][row * 128 * 4], &layers[1][l][(127 - row) * 128 * 4], 128 * 4) == 0);
+  }
+  QLibWad_Destroy(wads[0]);
+  QLibWad_Destroy(wads[1]);
 }

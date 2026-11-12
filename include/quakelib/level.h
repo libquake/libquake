@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <quakelib/surface.h>
+#include <quakelib/texture_name.h>
 #include <quakelib/vertex.h>
 
 namespace quakelib {
@@ -83,12 +84,18 @@ namespace quakelib {
 
   struct TextureInfo {
     std::string name;
+    /// size of rgba. sky textures from a bsp are split into two layers, width is half the miptex width
+    /// (texture coordinates of the meshes still use the miptex width)
     int width = 0;
     int height = 0;
-    /// RGBA, empty when the source has no pixels (map files, bsp without texture data)
+    /// RGBA, empty when the source has no pixels (map files, bsp without texture data). sky: the back layer
     std::vector<uint8_t> rgba;
+    /// sky only: the front (cloud) layer, same size as rgba, palette index 0 is transparent. empty otherwise
+    std::vector<uint8_t> skyFront;
     /// true if the texture has fullbright pixels (palette 224..254), sky textures never do
     bool hasEmission = false;
+    /// '{' textures: palette index 255 is transparent, draw with alpha test. set without pixels too
+    bool hasAlpha = false;
     /// RGBA like rgba, black except the fullbright pixels, empty without fullbrights
     std::vector<uint8_t> emission;
   };

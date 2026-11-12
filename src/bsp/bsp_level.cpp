@@ -16,30 +16,55 @@ namespace quakelib {
 
     Vec3 toVec3(const vec3f_t &v) { return Vec3{v.x, v.y, v.z}; }
 
+    // same split as wad::QuakeSkyTexture: left half front layer (index 0 transparent), right half back layer
+    void splitSky(const bsp::bspTexure &tex, const wad::Palette &palette, TextureInfo &info) {
+      const int fullWidth = (int)tex.width;
+      info.width = fullWidth / 2;
+      const size_t count = (size_t)info.width * info.height;
+      info.rgba.resize(count * 4);
+      info.skyFront.resize(count * 4);
+      for (int y = 0; y < info.height; y++) {
+        const uint8_t *line = tex.data + (size_t)y * fullWidth;
+        for (int x = 0; x < info.width; x++) {
+          size_t o = ((size_t)y * info.width + x) * 4;
+          auto front = palette.GetColor(line[x]);
+          auto back = palette.GetColor(line[info.width + x]);
+          std::copy(front.rgba, front.rgba + 3, info.skyFront.begin() + o);
+          info.skyFront[o + 3] = line[x] == 0 ? 0 : 255;
+          std::copy(back.rgba, back.rgba + 3, info.rgba.begin() + o);
+          info.rgba[o + 3] = 255;
+        }
+      }
+    }
+
     TextureInfo convertTexture(const bsp::bspTexure &tex, const wad::Palette &palette, bool withData) {
       TextureInfo info;
       info.name = tex.name;
       info.width = (int)tex.width;
       info.height = (int)tex.height;
+      const uint32_t flags = ClassifyTexture(tex.name);
+      info.hasAlpha = (flags & TEXTURE_ALPHA) != 0;
       if (!withData || !tex.hasData || !tex.data || tex.width == 0 || tex.height == 0)
         return info;
+      if ((flags & TEXTURE_SKY) && tex.width >= 2) {
+        splitSky(tex, palette, info);
+        return info;
+      }
 
-      // index 255 is transparent on '{' textures, sky is drawn without lighting anyway
-      bool cutout = !tex.name.empty() && tex.name[0] == '{';
-      bool sky = lower(tex.name).rfind("sky", 0) == 0;
+      // index 255 is transparent on '{' textures
       size_t count = (size_t)tex.width * tex.height;
       info.rgba.resize(count * 4);
       info.emission.assign(count * 4, 0);
       for (size_t i = 0; i < count; i++) {
         uint8_t index = tex.data[i];
         auto c = palette.GetColor(index);
-        bool clear = cutout && index == 255;
+        bool clear = info.hasAlpha && index == 255;
         info.rgba[i * 4 + 0] = clear ? 0 : c.rgba[0];
         info.rgba[i * 4 + 1] = clear ? 0 : c.rgba[1];
         info.rgba[i * 4 + 2] = clear ? 0 : c.rgba[2];
         info.rgba[i * 4 + 3] = clear ? 0 : 255;
         info.emission[i * 4 + 3] = 255;
-        if (!sky && wad::Palette::IsFullbright(index)) {
+        if (wad::Palette::IsFullbright(index)) {
           std::copy(c.rgba, c.rgba + 3, info.emission.begin() + i * 4);
           info.hasEmission = true;
         }

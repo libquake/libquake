@@ -4,9 +4,8 @@
 #include <cstring>
 #include <map>
 #include <memory>
-#include <optional>
-#include <quakelib/bsp/qbsp_provider.h>
-#include <quakelib/map/qmap_provider.h>
+#include <quakelib/bsp/bsp_level.h>
+#include <quakelib/map/map_level.h>
 #include <quakelib/wad/wad.h>
 #include <string>
 #include <unordered_map>
@@ -34,8 +33,6 @@ namespace {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return (char)std::tolower(c); });
     return s;
   }
-
-  bool isSkyName(const std::string &name) { return lower(name).rfind("sky", 0) == 0; }
 
   QLibResult fail(QLibResult r, const std::string &msg) {
     g_lastError = msg;
@@ -91,41 +88,64 @@ namespace {
 struct QLibLevel {
   uint32_t magic = LEVEL_MAGIC;
   bool isMap = false;
-  QLibMapOptions mapOptions{};
-  std::unique_ptr<quakelib::QMapProvider> map;
-  std::unique_ptr<quakelib::QBspProvider> bsp;
-  quakelib::IMapProvider *provider = nullptr;
-
-  std::map<std::string, std::pair<int, int>> textureSizes; // lower case names
   bool geometryReady = false;
+  bool openGL = false; // geometry converted, point origins are converted when they are read
 
+  // map: the parsed file and the build options, BuildMap runs in QLibMap_GenerateGeometry
+  quakelib::MapDocument doc;
+  quakelib::MapBuildOptions build;
+  std::map<std::string, std::pair<int, int>> textureSizes; // lower case names
+  bool baked = false;
+
+  quakelib::Level level;
+  quakelib::LightStyleAnimator styles;
   std::vector<std::string> textureNames;
   std::unordered_map<std::string, int32_t> textureIndex;
-  std::vector<std::optional<quakelib::TextureData>> textureData; // bsp, decoded on demand
-  std::vector<std::string> wads;
-  std::vector<quakelib::SolidEntityPtr> solids;
-  std::vector<quakelib::PointEntityPtr> points;
+  std::vector<uint32_t> solids; // indices into level.entities
+  std::vector<uint32_t> points;
   std::vector<EntityCache> cache;
 
-  void collect() {
-    textureNames = provider->GetTextureNames();
+  void setTextureNames(std::vector<std::string> names) {
+    textureNames = std::move(names);
     textureIndex.clear();
     for (size_t i = 0; i < textureNames.size(); i++)
       textureIndex.emplace(textureNames[i], (int32_t)i);
-    textureData.assign(textureNames.size(), std::nullopt);
-    wads = provider->GetRequiredWads();
-    solids = provider->GetSolidEntities();
-    points = provider->GetPointEntities();
+  }
+
+  void collect() {
+    std::vector<std::string> names;
+    for (const auto &t : level.textures)
+      names.push_back(t.name);
+    setTextureNames(std::move(names));
+    solids.clear();
+    points.clear();
+    for (size_t i = 0; i < level.entities.size(); i++)
+      (level.entities[i].geometry >= 0 ? solids : points).push_back((uint32_t)i);
     cache.assign(solids.size(), {});
+  }
+
+  const quakelib::LevelEntity &solid(uint32_t index) const { return level.entities[solids[index]]; }
+
+  const quakelib::EntityGeometry &geometry(uint32_t index) const {
+    return level.geometry[solid(index).geometry];
+  }
+
+  // the map lightmap is baked on first use, BuildMap is deterministic so the geometry does not change
+  void ensureBaked() {
+    if (!isMap || baked)
+      return;
+    auto opts = build;
+    opts.bake = true;
+    level.lightmap = quakelib::BuildMap(doc, opts).lightmap;
+    baked = true;
   }
 
   EntityCache &mesh(uint32_t entity) {
     auto &c = cache[entity];
     if (c.meshBuilt)
       return c;
-    auto meshes = provider->GetEntityMeshes(solids[entity]);
     bool first = true;
-    for (const auto &m : meshes) {
+    for (const auto &m : geometry(entity).meshes) {
       QLibSubmesh sub{};
       sub.vertexOffset = (uint32_t)c.vertices.size();
       sub.vertexCount = (uint32_t)m.vertices.size();
@@ -158,7 +178,7 @@ struct QLibLevel {
     auto &c = cache[entity];
     if (c.hullsBuilt)
       return c;
-    for (const auto &h : provider->GetEntityCollisionHulls(solids[entity])) {
+    for (const auto &h : geometry(entity).hulls) {
       QLibHull out{};
       out.type = (uint32_t)h.type;
       out.pointOffset = (uint32_t)c.hullPoints.size();
@@ -174,13 +194,8 @@ struct QLibLevel {
     return c;
   }
 
-  const quakelib::TextureData *texture(uint32_t index) {
-    if (isMap || index >= textureNames.size())
-      return nullptr;
-    if (!textureData[index])
-      textureData[index] =
-          provider->GetTextureData(textureNames[index]).value_or(quakelib::TextureData{0, 0, {}});
-    return &*textureData[index];
+  const quakelib::TextureInfo *texture(uint32_t index) const {
+    return !isMap && index < level.textures.size() ? &level.textures[index] : nullptr;
   }
 };
 
@@ -211,10 +226,26 @@ namespace {
     return QLIB_OK;
   }
 
-  quakelib::Entity *entityAt(QLibLevel *l, uint32_t solid, uint32_t index) {
-    if (solid)
-      return index < l->solids.size() ? l->solids[index].get() : nullptr;
-    return index < l->points.size() ? l->points[index].get() : nullptr;
+  const quakelib::LevelEntity *entityAt(QLibLevel *l, uint32_t solid, uint32_t index) {
+    const auto &list = solid ? l->solids : l->points;
+    return index < list.size() ? &l->level.entities[list[index]] : nullptr;
+  }
+
+  uint32_t nameFlags(const std::string &name) {
+    uint32_t f = quakelib::ClassifyTexture(name);
+    return ((f & quakelib::TEXTURE_SKY) ? QLIB_TEXTURE_SKY : 0) |
+           ((f & quakelib::TEXTURE_ALPHA) ? QLIB_TEXTURE_ALPHA : 0) |
+           ((f & quakelib::TEXTURE_LIQUID) ? QLIB_TEXTURE_LIQUID : 0);
+  }
+
+  uint32_t layerFlags(bool data, bool emission, bool skyFront) {
+    return (data ? QLIB_TEXTURE_HAS_DATA : 0) | (emission ? QLIB_TEXTURE_HAS_EMISSION : 0) |
+           (skyFront ? QLIB_TEXTURE_HAS_SKY_FRONT : 0);
+  }
+
+  // attribute 0 is the classname, the others follow in key order
+  uint32_t attributeCount(const quakelib::LevelEntity &e) {
+    return (uint32_t)(e.attributes.size() - e.attributes.count("classname")) + 1;
   }
 } // namespace
 
@@ -241,28 +272,26 @@ API_EXPORT QLibResult QLibMap_Load(const char *path, const QLibMapOptions *optio
       return fail(QLIB_ERROR_INVALID_ARGUMENT, "path and outLevel must not be null");
     *outLevel = nullptr;
 
+    QLibMapOptions opts;
+    QLibMap_GetDefaultOptions(&opts);
+    if (options)
+      opts = *options;
+
     auto level = std::make_unique<QLibLevel>();
     level->isMap = true;
-    QLibMap_GetDefaultOptions(&level->mapOptions);
-    if (options)
-      level->mapOptions = *options;
-
-    level->map = std::make_unique<quakelib::QMapProvider>();
-    quakelib::map::QMapConfig cfg;
-    cfg.csg = level->mapOptions.enableCSG != 0;
-    cfg.convertCoordToOGL = level->mapOptions.convertToOpenGL != 0;
-    if (!level->map->Load(path, cfg))
-      return fail(QLIB_ERROR_LOAD_FAILED, std::string("could not load map file ") + path);
-
-    quakelib::QMapProvider::LightmapUVOptions uv;
-    if (level->mapOptions.luxelSize > 0)
-      uv.luxelSize = level->mapOptions.luxelSize;
-    uv.padding = level->mapOptions.lightmapPadding;
-    level->map->SetLightmapUVOptions(uv);
-
-    level->provider = level->map.get();
-    level->textureNames = level->provider->GetTextureNames();
-    level->wads = level->provider->GetRequiredWads();
+    try {
+      level->doc = quakelib::ParseMap(path);
+    } catch (const std::exception &e) {
+      return fail(QLIB_ERROR_LOAD_FAILED, e.what());
+    }
+    level->build.csg = opts.enableCSG != 0;
+    level->build.convertToOpenGL = opts.convertToOpenGL != 0;
+    level->openGL = level->build.convertToOpenGL;
+    if (opts.luxelSize > 0)
+      level->build.lightmapUV.luxelSize = opts.luxelSize;
+    level->build.lightmapUV.padding = opts.lightmapPadding;
+    level->setTextureNames(level->doc.textures);
+    level->level.wads = level->doc.wads;
     *outLevel = level.release();
     return QLIB_OK;
   });
@@ -286,7 +315,7 @@ API_EXPORT QLibResult QLibMap_SetFaceType(QLibLevel *level, const char *textureN
       return r;
     if (!textureName || surfaceType > QLIB_SURFACE_NODRAW)
       return fail(QLIB_ERROR_INVALID_ARGUMENT, "invalid texture name or surface type");
-    level->map->SetFaceType(textureName, (quakelib::SurfaceType)surfaceType);
+    level->build.faceTypes[textureName] = (quakelib::SurfaceType)surfaceType;
     return QLIB_OK;
   });
 }
@@ -296,11 +325,12 @@ API_EXPORT QLibResult QLibMap_GenerateGeometry(QLibLevel *level) {
     if (auto r = checkMap(level); r != QLIB_OK)
       return r;
     auto *sizes = &level->textureSizes;
-    level->map->SetTextureBoundsProvider([sizes](const std::string &name) -> std::pair<int, int> {
+    level->build.textureSize = [sizes](const std::string &name) -> std::pair<int, int> {
       auto it = sizes->find(lower(name));
       return it != sizes->end() ? it->second : std::pair<int, int>{0, 0};
-    });
-    level->map->GenerateGeometry(level->mapOptions.enableCSG != 0);
+    };
+    level->level = quakelib::BuildMap(level->doc, level->build);
+    level->baked = false;
     level->collect();
     level->geometryReady = true;
     return QLIB_OK;
@@ -332,7 +362,8 @@ API_EXPORT QLibResult QLibMap_SetExtraLights(QLibLevel *level, const QLibLight *
       b.castShadows = l.castShadows != 0;
       out.push_back(b);
     }
-    level->map->SetExtraLights(std::move(out));
+    level->build.extraLights = std::move(out);
+    level->baked = false;
     return QLIB_OK;
   });
 }
@@ -358,15 +389,15 @@ API_EXPORT QLibResult QLibBsp_Load(const char *path, const QLibBspOptions *optio
       opts = *options;
 
     auto level = std::make_unique<QLibLevel>();
-    level->bsp = std::make_unique<quakelib::QBspProvider>();
-    quakelib::bsp::QBspConfig cfg;
-    cfg.loadTextures = opts.loadTextures != 0;
-    cfg.loadTextureData = opts.loadTextureData != 0;
-    cfg.convertCoordToOGL = opts.convertToOpenGL != 0;
-    if (!level->bsp->Load(path, cfg))
-      return fail(QLIB_ERROR_LOAD_FAILED, std::string("could not load bsp file ") + path);
-
-    level->provider = level->bsp.get();
+    quakelib::BspLoadOptions load;
+    load.loadTextureData = opts.loadTextures != 0 && opts.loadTextureData != 0;
+    load.convertToOpenGL = opts.convertToOpenGL != 0;
+    level->openGL = load.convertToOpenGL;
+    try {
+      level->level = quakelib::LoadBsp(path, load);
+    } catch (const std::exception &e) {
+      return fail(QLIB_ERROR_LOAD_FAILED, e.what());
+    }
     level->collect();
     level->geometryReady = true;
     *outLevel = level.release();
@@ -398,7 +429,7 @@ API_EXPORT QLibResult QLibLevel_GetTextureInfo(QLibLevel *level, uint32_t index,
     const auto &name = level->textureNames[index];
     QLibTextureInfo info{};
     info.name = name.c_str();
-    info.isSky = isSkyName(name);
+    info.flags = nameFlags(name);
     if (level->isMap) {
       auto it = level->textureSizes.find(lower(name));
       if (it != level->textureSizes.end()) {
@@ -408,52 +439,45 @@ API_EXPORT QLibResult QLibLevel_GetTextureInfo(QLibLevel *level, uint32_t index,
     } else if (const auto *t = level->texture(index)) {
       info.width = (uint32_t)t->width;
       info.height = (uint32_t)t->height;
-      info.hasData = !t->data.empty();
-      info.hasEmission = !t->emission.empty();
+      info.flags |= layerFlags(!t->rgba.empty(), t->hasEmission, !t->skyFront.empty());
     }
     *outInfo = info;
     return QLIB_OK;
   });
 }
 
-API_EXPORT QLibResult QLibLevel_CopyTexturePixels(QLibLevel *level, uint32_t index, uint8_t *rgba,
-                                                  uint32_t byteCount) {
+API_EXPORT QLibResult QLibLevel_CopyTextureLayer(QLibLevel *level, uint32_t index, uint32_t layer,
+                                                 uint8_t *rgba, uint32_t byteCount) {
   return guard([&] {
     if (auto r = checkLevel(level, false); r != QLIB_OK)
       return r;
     const auto *t = level->texture(index);
-    if (!t || t->data.empty())
-      return fail(QLIB_ERROR_INVALID_ARGUMENT, "texture has no pixel data");
-    if (!rgba || byteCount < t->data.size())
+    if (!t)
+      return fail(QLIB_ERROR_INVALID_ARGUMENT, "invalid texture index or not a BSP");
+    const std::vector<uint8_t> *px = nullptr;
+    if (layer == QLIB_TEXTURE_LAYER_ALBEDO)
+      px = &t->rgba;
+    else if (layer == QLIB_TEXTURE_LAYER_EMISSION)
+      px = &t->emission;
+    else if (layer == QLIB_TEXTURE_LAYER_SKY_FRONT)
+      px = &t->skyFront;
+    if (!px || px->empty())
+      return fail(QLIB_ERROR_INVALID_ARGUMENT, "texture does not have this layer");
+    if (!rgba || byteCount < px->size())
       return fail(QLIB_ERROR_BUFFER_TOO_SMALL, "buffer needs width * height * 4 bytes");
-    std::memcpy(rgba, t->data.data(), t->data.size());
-    return QLIB_OK;
-  });
-}
-
-API_EXPORT QLibResult QLibLevel_CopyTextureEmission(QLibLevel *level, uint32_t index, uint8_t *rgba,
-                                                    uint32_t byteCount) {
-  return guard([&] {
-    if (auto r = checkLevel(level, false); r != QLIB_OK)
-      return r;
-    const auto *t = level->texture(index);
-    if (!t || t->emission.empty())
-      return fail(QLIB_ERROR_INVALID_ARGUMENT, "texture has no emission");
-    if (!rgba || byteCount < t->emission.size())
-      return fail(QLIB_ERROR_BUFFER_TOO_SMALL, "buffer needs width * height * 4 bytes");
-    std::memcpy(rgba, t->emission.data(), t->emission.size());
+    std::memcpy(rgba, px->data(), px->size());
     return QLIB_OK;
   });
 }
 
 API_EXPORT uint32_t QLibLevel_GetRequiredWadCount(QLibLevel *level) {
-  return valid(level) ? (uint32_t)level->wads.size() : 0;
+  return valid(level) ? (uint32_t)level->level.wads.size() : 0;
 }
 
 API_EXPORT const char *QLibLevel_GetRequiredWad(QLibLevel *level, uint32_t index) {
-  if (!valid(level) || index >= level->wads.size())
+  if (!valid(level) || index >= level->level.wads.size())
     return nullptr;
-  return level->wads[index].c_str();
+  return level->level.wads[index].c_str();
 }
 
 API_EXPORT uint32_t QLibLevel_GetSolidEntityCount(QLibLevel *level) {
@@ -470,13 +494,14 @@ API_EXPORT QLibResult QLibLevel_GetSolidEntityInfo(QLibLevel *level, uint32_t en
     auto &m = level->mesh(entity);
     auto &h = level->hulls(entity);
     QLibSolidEntityInfo info{};
-    info.className = level->solids[entity]->ClassName().c_str();
+    const auto &e = level->solid(entity);
+    info.className = e.classname.c_str();
     info.boundsMin = m.boundsMin;
     info.boundsMax = m.boundsMax;
     info.vertexCount = (uint32_t)m.vertices.size();
     info.indexCount = (uint32_t)m.indices.size();
     info.submeshCount = (uint32_t)m.submeshes.size();
-    info.attributeCount = (uint32_t)level->solids[entity]->Attributes().size() + 1;
+    info.attributeCount = attributeCount(e);
     info.hullCount = (uint32_t)h.hulls.size();
     info.hullPointCount = (uint32_t)h.hullPoints.size();
     info.hullIndexCount = (uint32_t)h.hullIndices.size();
@@ -540,12 +565,13 @@ API_EXPORT QLibResult QLibLevel_GetPointEntityInfo(QLibLevel *level, uint32_t en
       return r;
     if (!outInfo || entity >= level->points.size())
       return fail(QLIB_ERROR_INVALID_ARGUMENT, "invalid entity index");
-    auto &e = level->points[entity];
+    const auto &e = level->level.entities[level->points[entity]];
     QLibPointEntityInfo info{};
-    info.className = e->ClassName().c_str();
-    info.origin = toC(e->Origin());
-    info.angle = e->Angle();
-    info.attributeCount = (uint32_t)e->Attributes().size() + 1;
+    info.className = e.classname.c_str();
+    auto o = e.Origin();
+    info.origin = level->openGL ? QLibVec3{o[0], o[2], -o[1]} : toC(o);
+    info.angle = e.Float("angle");
+    info.attributeCount = attributeCount(e);
     *outInfo = info;
     return QLIB_OK;
   });
@@ -560,17 +586,21 @@ API_EXPORT QLibResult QLibLevel_GetEntityAttribute(QLibLevel *level, uint32_t so
     auto *e = entityAt(level, solid, entity);
     if (!e || !outKey || !outValue)
       return fail(QLIB_ERROR_INVALID_ARGUMENT, "invalid entity index");
-    // attribute 0 is the classname, it is not part of the attribute map
     static const std::string classKey = "classname";
     if (attribute == 0) {
       *outKey = classKey.c_str();
-      *outValue = e->ClassName().c_str();
+      *outValue = e->classname.c_str();
       return QLIB_OK;
     }
-    const auto &attrs = e->Attributes();
-    if (attribute > attrs.size())
+    if (attribute >= attributeCount(*e))
       return fail(QLIB_ERROR_INVALID_ARGUMENT, "invalid attribute index");
-    auto it = std::next(attrs.begin(), attribute - 1);
+    auto it = e->attributes.begin();
+    for (uint32_t i = 1;; ++it) {
+      if (it->first == classKey)
+        continue;
+      if (i++ == attribute)
+        break;
+    }
     *outKey = it->first.c_str();
     *outValue = it->second.c_str();
     return QLIB_OK;
@@ -583,17 +613,14 @@ API_EXPORT QLibResult QLibLevel_GetLightmapInfo(QLibLevel *level, QLibLightmapIn
       return r;
     if (!outInfo)
       return fail(QLIB_ERROR_INVALID_ARGUMENT, "outInfo must not be null");
+    level->ensureBaked();
+    const auto &lm = level->level.lightmap;
     QLibLightmapInfo info{};
-    if (level->isMap) {
-      const auto &baked = level->map->GetBakedLightmap();
-      info.width = (uint32_t)baked.width;
-      info.height = (uint32_t)baked.height;
-      info.layerCount = (uint32_t)baked.styles.size();
-      info.luxelSize = level->map->GetLightmapLayout().luxelSize;
-    } else if (auto lm = level->provider->GetLightmapData()) {
-      info.width = (uint32_t)lm->width;
-      info.height = (uint32_t)lm->height;
-      info.layerCount = 1;
+    if (!lm.Empty()) {
+      info.width = (uint32_t)lm.width;
+      info.height = (uint32_t)lm.height;
+      info.layerCount = (uint32_t)lm.styles.size();
+      info.luxelSize = level->isMap ? level->build.lightmapUV.luxelSize : 0;
     }
     *outInfo = info;
     return QLIB_OK;
@@ -604,12 +631,14 @@ API_EXPORT QLibResult QLibLevel_CopyLightmap(QLibLevel *level, uint8_t *rgba, ui
   return guard([&] {
     if (auto r = checkLevel(level, true); r != QLIB_OK)
       return r;
-    auto lm = level->provider->GetLightmapData();
-    if (!lm)
+    level->ensureBaked();
+    const auto &lm = level->level.lightmap;
+    if (lm.Empty())
       return fail(QLIB_ERROR_NOT_READY, "this level has no lightmap");
-    if (!rgba || byteCount < lm->data.size())
+    if (!rgba || byteCount < (size_t)lm.width * lm.height * 4)
       return fail(QLIB_ERROR_BUFFER_TOO_SMALL, "buffer needs width * height * 4 bytes");
-    std::memcpy(rgba, lm->data.data(), lm->data.size());
+    auto composed = level->styles.Compose(lm);
+    std::memcpy(rgba, composed.data(), composed.size());
     return QLIB_OK;
   });
 }
@@ -619,15 +648,8 @@ API_EXPORT QLibResult QLibLevel_CopyLightmapLayer(QLibLevel *level, uint32_t lay
   return guard([&] {
     if (auto r = checkLevel(level, true); r != QLIB_OK)
       return r;
-    if (!level->isMap) {
-      // bsp lightmaps are only available combined
-      if (layer != 0)
-        return fail(QLIB_ERROR_INVALID_ARGUMENT, "invalid layer");
-      if (outStyle)
-        *outStyle = 0;
-      return QLibLevel_CopyLightmap(level, rgba, byteCount);
-    }
-    const auto &baked = level->map->GetBakedLightmap();
+    level->ensureBaked();
+    const auto &baked = level->level.lightmap;
     if (layer >= baked.layers.size())
       return fail(QLIB_ERROR_INVALID_ARGUMENT, "invalid layer");
     const auto &px = baked.layers[layer];
@@ -646,7 +668,7 @@ API_EXPORT QLibResult QLibLevel_SetLightStyle(QLibLevel *level, int32_t style, c
       return r;
     if (!pattern || style < 0 || style > 255)
       return fail(QLIB_ERROR_INVALID_ARGUMENT, "invalid style or pattern");
-    level->provider->SetLightStyle(style, pattern);
+    level->styles.SetStyle(style, pattern);
     return QLIB_OK;
   });
 }
@@ -655,7 +677,7 @@ API_EXPORT QLibResult QLibLevel_UpdateLightStyles(QLibLevel *level, double time,
   return guard([&] {
     if (auto r = checkLevel(level, true); r != QLIB_OK)
       return r;
-    bool changed = level->provider->UpdateLightStyles(time);
+    bool changed = level->styles.Update(time, level->level.lightmap);
     if (outChanged)
       *outChanged = changed ? 1 : 0;
     return QLIB_OK;
@@ -707,12 +729,11 @@ API_EXPORT QLibResult QLibWad_GetTextureInfo(QLibWad *wad, uint32_t index, QLibT
     auto *tex = wad->wad->GetTexture(name);
     QLibTextureInfo info{};
     info.name = name.c_str();
-    info.isSky = quakelib::wad::QuakeWad::IsSkyTexture(name);
+    info.flags = nameFlags(name);
     if (tex) {
       info.width = tex->width;
       info.height = tex->height;
-      info.hasData = !tex->raw.empty();
-      info.hasEmission = tex->hasEmission;
+      info.flags |= layerFlags(!tex->raw.empty(), tex->hasEmission, !tex->front.empty());
     }
     *outInfo = info;
     return QLIB_OK;
@@ -723,41 +744,34 @@ API_EXPORT int32_t QLibWad_FindTexture(QLibWad *wad, const char *name) {
   return guardValue<int32_t>(-1, [&]() -> int32_t {
     if (!valid(wad) || !name)
       return -1;
-    auto it = std::find(wad->names.begin(), wad->names.end(), lower(name));
+    auto wanted = lower(name);
+    auto it = std::find(wad->names.begin(), wad->names.end(), name);
+    if (it == wad->names.end())
+      it = std::find_if(wad->names.begin(), wad->names.end(),
+                        [&](const std::string &n) { return lower(n) == wanted; });
     return it != wad->names.end() ? (int32_t)(it - wad->names.begin()) : -1;
   });
 }
 
-API_EXPORT QLibResult QLibWad_CopyTexturePixels(QLibWad *wad, uint32_t index, uint8_t *rgba,
-                                                uint32_t byteCount) {
+API_EXPORT QLibResult QLibWad_CopyTextureLayer(QLibWad *wad, uint32_t index, uint32_t layer, uint8_t *rgba,
+                                               uint32_t byteCount) {
   return guard([&] {
     if (!valid(wad) || index >= wad->names.size())
       return fail(QLIB_ERROR_INVALID_ARGUMENT, "invalid wad handle or texture index");
     auto *tex = wad->wad->GetTexture(wad->names[index]);
-    if (!tex || tex->raw.empty())
-      return fail(QLIB_ERROR_INVALID_ARGUMENT, "texture has no pixel data");
-    size_t bytes = tex->raw.size() * 4;
-    if (!rgba || byteCount < bytes)
+    const quakelib::wad::cvec *px = nullptr;
+    if (tex && layer == QLIB_TEXTURE_LAYER_ALBEDO)
+      px = &tex->raw;
+    else if (tex && layer == QLIB_TEXTURE_LAYER_EMISSION)
+      px = &tex->emission;
+    else if (tex && layer == QLIB_TEXTURE_LAYER_SKY_FRONT)
+      px = &tex->front;
+    if (!px || px->empty())
+      return fail(QLIB_ERROR_INVALID_ARGUMENT, "texture does not have this layer");
+    if (!rgba || byteCount < px->size() * 4)
       return fail(QLIB_ERROR_BUFFER_TOO_SMALL, "buffer needs width * height * 4 bytes");
-    for (size_t i = 0; i < tex->raw.size(); i++)
-      std::memcpy(rgba + i * 4, tex->raw[i].rgba, 4);
-    return QLIB_OK;
-  });
-}
-
-API_EXPORT QLibResult QLibWad_CopyTextureEmission(QLibWad *wad, uint32_t index, uint8_t *rgba,
-                                                  uint32_t byteCount) {
-  return guard([&] {
-    if (!valid(wad) || index >= wad->names.size())
-      return fail(QLIB_ERROR_INVALID_ARGUMENT, "invalid wad handle or texture index");
-    auto *tex = wad->wad->GetTexture(wad->names[index]);
-    if (!tex || !tex->hasEmission)
-      return fail(QLIB_ERROR_INVALID_ARGUMENT, "texture has no emission");
-    size_t bytes = tex->emission.size() * 4;
-    if (!rgba || byteCount < bytes)
-      return fail(QLIB_ERROR_BUFFER_TOO_SMALL, "buffer needs width * height * 4 bytes");
-    for (size_t i = 0; i < tex->emission.size(); i++)
-      std::memcpy(rgba + i * 4, tex->emission[i].rgba, 4);
+    for (size_t i = 0; i < px->size(); i++)
+      std::memcpy(rgba + i * 4, (*px)[i].rgba, 4);
     return QLIB_OK;
   });
 }

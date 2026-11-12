@@ -87,4 +87,4 @@ namespace quakelib::wad {
     return nullptr;
   }
 
-}
+} // namespace quakelib::wad

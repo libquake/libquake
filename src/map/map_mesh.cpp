@@ -220,7 +220,7 @@ namespace quakelib::detail {
       bool liquid = false, allClip = true, allNonSolid = true;
       for (const auto &f : brush.Faces()) {
         std::string name = baseLowerName(textureName(textures, f->TextureID()));
-        liquid |= !name.empty() && name[0] == '*';
+        liquid |= IsLiquidTexture(name);
         allClip &= f->Type() == map::MapSurface::CLIP;
         allNonSolid &= name == "hint" || name == "hintskip" || name == "origin";
       }
@@ -270,7 +270,7 @@ namespace quakelib::detail {
         bool liquid = false, allClip = true, allNonSolid = true;
         for (const auto &f : brush.Faces()) {
           std::string name = baseLowerName(textureName(textures, f->TextureID()));
-          liquid |= !name.empty() && name[0] == '*';
+          liquid |= IsLiquidTexture(name);
           allClip &= f->Type() == map::MapSurface::CLIP;
           allNonSolid &= name == "hint" || name == "hintskip" || name == "origin";
         }
@@ -279,7 +279,7 @@ namespace quakelib::detail {
           continue;
         for (const auto &f : brush.Faces()) {
           const auto &v = f->Vertices();
-          bool sky = baseLowerName(textureName(textures, f->TextureID())).rfind("sky", 0) == 0;
+          bool sky = IsSkyTexture(textureName(textures, f->TextureID()));
           for (size_t k = 1; k + 1 < v.size(); k++) {
             occ.triangles.insert(occ.triangles.end(), {v[0].point, v[k].point, v[k + 1].point});
             occ.isSky.push_back(sky);

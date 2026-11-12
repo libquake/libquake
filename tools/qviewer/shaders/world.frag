@@ -41,9 +41,11 @@ void main()
     }
 
     vec4 albedo = texture(texture0, texUV);
+#ifdef ALPHA_TEST
     // '{' textures: palette index 255 is a hole
     if (albedo.a < 0.5)
         discard;
+#endif
 
     // 1. light: the lightmap stores half the light, so it can brighten up to twice the texture color
     vec3 light = texture(texture1, lightmapUV).rgb * 2.0;

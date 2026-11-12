@@ -19,7 +19,9 @@ keeps the named wads first.
 ## Pixels
 
 `QuakeTexture::raw` holds `width * height` RGBA colors converted with the Quake palette, top row first.
-Palette index 255 has alpha 0, it is the transparent color of `{` textures. `QuakeWad::FromFile` with
+Textures whose name starts with `{` have `hasAlpha` set and palette index 255 is transparent (all four
+channels 0), the same rule as the engine. Everywhere else index 255 is an ordinary opaque color. Bsp
+textures (`TextureInfo`) follow the same rule. `QuakeWad::FromFile` with
 `flipTexHorizontal = true` stores the rows bottom up instead (the name is misleading, it flips vertically).
 
 ## Emission
@@ -48,4 +50,6 @@ vec3 color = mix(albedo.rgb * light, emission, glow);
 
 Quake skies are 256x128 with two layers side by side. Wad sky textures (names starting with `sky`) are
 split on load: `raw` is the solid back layer, `front` the cloud layer with palette index 0 transparent,
-both 128x128. Bsp sky textures in `level.textures` are not split.
+both 128x128. Bsp sky textures in `level.textures` are split the same way: `rgba` is the back layer,
+`skyFront` the cloud layer, `width` is the layer width. Mesh texture coordinates still use the full
+miptex width (`RenderMesh::textureWidth`).

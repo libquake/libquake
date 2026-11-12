@@ -27,7 +27,7 @@
 #endif
 
 /// bumped on every incompatible change, bindings should compare it with the version they were written for
-#define QLIB_API_VERSION 2
+#define QLIB_API_VERSION 3
 
 typedef enum QLibResult {
   QLIB_OK = 0,
@@ -154,14 +154,27 @@ typedef struct QLibBspOptions {
   uint32_t reserved;
 } QLibBspOptions;
 
+typedef enum QLibTextureFlags {
+  QLIB_TEXTURE_SKY = 1 << 0,      ///< name starts with "sky", two layers (albedo = back, sky front = clouds)
+  QLIB_TEXTURE_ALPHA = 1 << 1,    ///< name starts with '{', palette index 255 is transparent: alpha test
+  QLIB_TEXTURE_LIQUID = 1 << 2,   ///< name starts with '*' (water, slime, lava, teleporter)
+  QLIB_TEXTURE_HAS_DATA = 1 << 3, ///< pixels available (not for MAP files or BSPs compiled with -notex)
+  QLIB_TEXTURE_HAS_EMISSION = 1 << 4,  ///< fullbright pixels, QLIB_TEXTURE_LAYER_EMISSION
+  QLIB_TEXTURE_HAS_SKY_FRONT = 1 << 5, ///< QLIB_TEXTURE_LAYER_SKY_FRONT
+} QLibTextureFlags;
+
+typedef enum QLibTextureLayer {
+  QLIB_TEXTURE_LAYER_ALBEDO = 0,    ///< the texture, the back layer of skies
+  QLIB_TEXTURE_LAYER_EMISSION = 1,  ///< black except the fullbright pixels (palette 224..254)
+  QLIB_TEXTURE_LAYER_SKY_FRONT = 2, ///< cloud layer of skies, palette index 0 transparent
+} QLibTextureLayer;
+
 typedef struct QLibTextureInfo {
   const char *name;
-  uint32_t width;
+  uint32_t width; ///< sky: the size of one layer, half the width stored in the file
   uint32_t height;
-  uint32_t isSky;
-  uint32_t hasData;     ///< 0 if the texture has no pixels (e.g. BSP compiled with -notex)
-  uint32_t hasEmission; ///< 1 if the texture has fullbright pixels, see Copy*TextureEmission
-  uint32_t reserved;
+  uint32_t flags; ///< QLibTextureFlags
+  uint32_t reserved[3];
 } QLibTextureInfo;
 
 /// a loaded MAP or BSP file
@@ -206,14 +219,10 @@ API_EXPORT void QLibLevel_Destroy(QLibLevel *level);
 
 API_EXPORT uint32_t QLibLevel_GetTextureCount(QLibLevel *level);
 API_EXPORT QLibResult QLibLevel_GetTextureInfo(QLibLevel *level, uint32_t index, QLibTextureInfo *outInfo);
-/// RGBA pixels of a texture embedded in a BSP, width * height * 4 bytes
-API_EXPORT QLibResult QLibLevel_CopyTexturePixels(QLibLevel *level, uint32_t index, uint8_t *rgba,
-                                                  uint32_t byteCount);
-
-/// RGBA emission map of a BSP texture: black except the fullbright pixels (palette 224..254), same size and
-/// layout as the pixels. Fails if the texture has no emission.
-API_EXPORT QLibResult QLibLevel_CopyTextureEmission(QLibLevel *level, uint32_t index, uint8_t *rgba,
-                                                    uint32_t byteCount);
+/// RGBA layer (QLibTextureLayer) of a texture embedded in a BSP, width * height * 4 bytes. Fails if the
+/// texture does not have the layer, see QLibTextureInfo::flags.
+API_EXPORT QLibResult QLibLevel_CopyTextureLayer(QLibLevel *level, uint32_t index, uint32_t layer,
+                                                 uint8_t *rgba, uint32_t byteCount);
 
 /// names of the wad files a MAP file asks for (worldspawn "wad" key, without path)
 API_EXPORT uint32_t QLibLevel_GetRequiredWadCount(QLibLevel *level);
@@ -263,8 +272,7 @@ API_EXPORT uint32_t QLibWad_GetTextureCount(QLibWad *wad);
 API_EXPORT QLibResult QLibWad_GetTextureInfo(QLibWad *wad, uint32_t index, QLibTextureInfo *outInfo);
 /// index of a texture by name (case insensitive), -1 if not found
 API_EXPORT int32_t QLibWad_FindTexture(QLibWad *wad, const char *name);
-API_EXPORT QLibResult QLibWad_CopyTexturePixels(QLibWad *wad, uint32_t index, uint8_t *rgba,
-                                                uint32_t byteCount);
-/// RGBA emission map, black except the fullbright pixels, same layout as CopyTexturePixels
-API_EXPORT QLibResult QLibWad_CopyTextureEmission(QLibWad *wad, uint32_t index, uint8_t *rgba,
-                                                  uint32_t byteCount);
+/// RGBA layer (QLibTextureLayer), width * height * 4 bytes, rows flipped when the wad was loaded with
+/// flipHorizontal. Fails if the texture does not have the layer.
+API_EXPORT QLibResult QLibWad_CopyTextureLayer(QLibWad *wad, uint32_t index, uint32_t layer, uint8_t *rgba,
+                                               uint32_t byteCount);

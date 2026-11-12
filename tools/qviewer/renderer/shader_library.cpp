@@ -27,9 +27,14 @@ namespace {
   }
 } // namespace
 
-Shader LoadViewerShader(const char *vertexName, const char *fragmentName, bool fromDisk) {
+Shader LoadViewerShader(const char *vertexName, const char *fragmentName, bool fromDisk,
+                        const char *defines) {
   std::string vs = sourceOf(vertexName, fromDisk);
   std::string fs = sourceOf(fragmentName, fromDisk);
+  if (defines) {
+    auto line = fs.find('\n');
+    fs.insert(line == std::string::npos ? 0 : line + 1, defines);
+  }
   Shader shader = LoadShaderFromMemory(vs.empty() ? nullptr : vs.c_str(), fs.c_str());
   // raylib falls back to its default shader (and its shared locations) when compiling fails
   if (shader.id == rlGetShaderIdDefault()) {

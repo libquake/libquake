@@ -4,6 +4,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <quakelib/texture_name.h>
 #include <string>
 
 namespace quakelib::wad {
@@ -32,10 +33,12 @@ namespace quakelib::wad {
      */
     virtual void FillTextureData(const uint8_t *buff, size_t size, bool flipHorizontal, const Palette &pal);
 
-    unsigned int width = 0;                        ///< Width in pixels.
-    unsigned int height = 0;                       ///< Height in pixels.
-    unsigned int mipOffsets[MAX_MIP_LEVELS];       ///< Offsets to mipmap levels.
-    bool hasEmission = false; ///< true if the texture has fullbright pixels (palette 224..254)
+    unsigned int width = 0;                  ///< Width in pixels.
+    unsigned int height = 0;                 ///< Height in pixels.
+    unsigned int mipOffsets[MAX_MIP_LEVELS]; ///< Offsets to mipmap levels.
+    bool hasEmission = false;                ///< true if the texture has fullbright pixels (palette 224..254)
+    /// '{' textures: palette index 255 is transparent (rgba 0), set before FillTextureData
+    bool hasAlpha = false;
     /// same layout as raw: black everywhere except the fullbright pixels, empty without fullbrights
     cvec emission;
     /// sky textures only: the front (cloud) layer, palette index 0 is transparent. raw is the back layer.
@@ -146,12 +149,12 @@ namespace quakelib::wad {
     /**
      * @brief Creates a texture from a raw buffer (manual creation).
      * @param buff Raw pixel data.
-     * @param isSky True if this is a sky texture.
+     * @param flags TextureFlags of the name (sky, alpha), see ClassifyTexture.
      * @param width Width of the texture.
      * @param height Height of the texture.
      * @return Pointer to the created texture.
      */
-    QuakeTexture *FromBuffer(const uint8_t *buff, bool isSky, int width, int height);
+    QuakeTexture *FromBuffer(const uint8_t *buff, uint32_t flags, int width, int height);
 
     /**
      * @brief Destructor.
@@ -159,7 +162,7 @@ namespace quakelib::wad {
     ~QuakeWad();
 
     /**
-     * @brief Retrieves a texture by name.
+     * @brief Retrieves a texture by name, case insensitive.
      * @param textureName Name of the texture.
      * @return Pointer to the texture if found, nullptr otherwise.
      */
@@ -188,7 +191,7 @@ namespace quakelib::wad {
      * @param texname The texture name (e.g., "sky1").
      * @return True if it starts with "sky", false otherwise.
      */
-    static bool IsSkyTexture(const std::string texname);
+    static bool IsSkyTexture(const std::string &texname) { return quakelib::IsSkyTexture(texname); }
 
   private:
     unsigned int m_numEntries;
@@ -196,5 +199,6 @@ namespace quakelib::wad {
     Palette m_pal = default_palette;
     std::ifstream m_istream;
     std::map<std::string, QuakeWadEntry> m_entries;
+    std::map<std::string, std::string> m_lowerNames; // lower case name -> entry name
   };
 } // namespace quakelib::wad

@@ -1,4 +1,5 @@
 #include <quakelib/lightmap_layout.h>
+#include <quakelib/texture_name.h>
 
 #include <algorithm>
 #include <array>
@@ -166,12 +167,7 @@ namespace quakelib {
   } // namespace
 
   bool IsQuakeUnlitTexture(const std::string &name) {
-    if (name.empty())
-      return false;
-    if (name[0] == '*')
-      return true;
-    return name.size() >= 3 && std::tolower((unsigned char)name[0]) == 's' &&
-           std::tolower((unsigned char)name[1]) == 'k' && std::tolower((unsigned char)name[2]) == 'y';
+    return (ClassifyTexture(name) & (TEXTURE_SKY | TEXTURE_LIQUID)) != 0;
   }
 
   LightmapLayout BuildLightmapLayout(std::vector<RenderMesh *> meshes, const LightmapLayoutOptions &opts) {

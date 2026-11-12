@@ -79,12 +79,19 @@ Values are never converted to OpenGL coordinates.
 | Member | |
 |---|---|
 | `std::string name` | |
-| `int width`, `height` | |
-| `std::vector<uint8_t> rgba` | empty for maps and bsp files without texture data |
+| `int width`, `height` | size of `rgba`. Sky: one layer, half the miptex width |
+| `std::vector<uint8_t> rgba` | empty for maps and bsp files without texture data. Sky: the back layer |
+| `std::vector<uint8_t> skyFront` | sky only: the cloud layer, index 0 transparent, empty otherwise |
 | `bool hasEmission` | has fullbright pixels |
+| `bool hasAlpha` | name starts with `{`, index 255 is transparent, draw with alpha test. Set for maps too |
 | `std::vector<uint8_t> emission` | RGBA, black except the fullbright pixels, empty without them |
 
 ## Functions
+
+`uint32_t ClassifyTexture(const std::string &textureName)`
+:   `TextureFlags` from the name alone, case insensitive, a path is ignored: `TEXTURE_SKY` (`sky...`),
+    `TEXTURE_ALPHA` (`{...`), `TEXTURE_LIQUID` (`*...`). `IsSkyTexture`, `IsAlphaTexture` and
+    `IsLiquidTexture` test one flag. `#include <quakelib/texture_name.h>`, included by `level.h`.
 
 `SurfaceType DefaultSurfaceType(const std::string &textureName)`
 :   `CLIP` for `clip` and `trigger`, `SKIP` for `skip`, `hint`, `hintskip`, `nodraw`, `caulk` and

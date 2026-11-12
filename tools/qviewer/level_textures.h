@@ -1,5 +1,6 @@
 #pragma once
 
+#include "renderer/shader_library.h"
 #include <quakelib/level.h>
 #include <quakelib/wad/wad_manager.h>
 #include <raylib.h>
@@ -10,7 +11,8 @@
  * @brief Textures and materials of a level, one material per entry of Level::textures.
  *
  * Material maps as the shaders see them:
- *   walls: texture0 albedo, texture1 lightmap, texture2 emission (fullbright pixels)
+ *   walls: texture0 albedo, texture1 lightmap, texture2 emission (fullbright pixels). '{' textures use
+ *          the alpha test shader
  *   sky:   texture0 back layer, texture1 front layer
  */
 class LevelTextures {
@@ -23,8 +25,8 @@ public:
   /// size of a wad texture, {0, 0} if unknown
   std::pair<int, int> Size(const std::string &name);
 
-  void Build(const quakelib::Level &level, Shader worldShader, Shader skyShader, Texture2D lightmap);
-  void SetShaders(Shader worldShader, Shader skyShader);
+  void Build(const quakelib::Level &level, const SurfaceShaders &shaders, Texture2D lightmap);
+  void SetShaders(const SurfaceShaders &shaders);
   void SetPointFiltering(bool point);
   void Unload();
 
@@ -48,7 +50,10 @@ private:
 
   quakelib::wad::QuakeWadManager wads;
   std::vector<Material> materials;
-  std::vector<bool> isSky;
+  enum class Kind { World, Alpha, Sky };
+  static Shader shaderFor(Kind kind, const SurfaceShaders &shaders);
+
+  std::vector<Kind> kinds;
   std::vector<Texture2D> textures;
   std::vector<std::string> missing;
   Texture2D black{};

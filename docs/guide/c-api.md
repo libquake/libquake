@@ -48,13 +48,15 @@ hull's `pointOffset`.
 
 `QLibLevel_CopyLightmap` returns all layers combined with the current light style values. Call
 `QLibLevel_UpdateLightStyles` every frame and copy again when `changed` is set.
-`QLibLevel_CopyLightmapLayer` gives single layers of a map for engines that combine them in a shader.
+`QLibLevel_CopyLightmapLayer` gives single layers (map and bsp) for engines that combine them in a shader.
 
 ## Textures
 
-`QLibLevel_GetTextureInfo` and `QLibLevel_CopyTexturePixels` read textures embedded in a bsp. For maps, load
+`QLibLevel_GetTextureInfo` and `QLibLevel_CopyTextureLayer` read textures embedded in a bsp. For maps, load
 the wads named by `QLibLevel_GetRequiredWad` with `QLibWad_Load` and look the textures up with
-`QLibWad_FindTexture`. Both have a `Copy*TextureEmission` function for textures with `hasEmission`.
+`QLibWad_FindTexture`. `flags` tells which layers exist and how to draw the texture: skies have a back layer
+(albedo) and a cloud layer (sky front), `QLIB_TEXTURE_ALPHA` textures need an alpha test, fullbright pixels
+come as an emission layer. Wad and bsp textures behave the same.
 
 ## Lifetime
 

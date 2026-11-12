@@ -9,19 +9,20 @@ namespace {
 } // namespace
 
 bool WorldRenderer::LoadShaders(bool fromDisk) {
-  Shader newWorld = LoadViewerShader("world.vert", "world.frag", fromDisk);
-  Shader newSky = LoadViewerShader("world.vert", "sky.frag", fromDisk);
-  if (newWorld.id == 0 || newSky.id == 0) {
-    for (Shader s : {newWorld, newSky})
+  SurfaceShaders loaded;
+  loaded.world = LoadViewerShader("world.vert", "world.frag", fromDisk);
+  loaded.alpha = LoadViewerShader("world.vert", "world.frag", fromDisk, "#define ALPHA_TEST\n");
+  loaded.sky = LoadViewerShader("world.vert", "sky.frag", fromDisk);
+  if (loaded.world.id == 0 || loaded.alpha.id == 0 || loaded.sky.id == 0) {
+    for (Shader s : {loaded.world, loaded.alpha, loaded.sky})
       if (s.id > 0)
         UnloadShader(s);
     return false;
   }
 
   Unload();
-  world = newWorld;
-  sky = newSky;
-  for (auto [shader, loc] : {std::pair{world, &worldLoc}, std::pair{sky, &skyLoc}}) {
+  shaders = loaded;
+  for (auto [shader, loc] : all()) {
     loc->viewPos = GetShaderLocation(shader, "viewPos");
     loc->fog = GetShaderLocation(shader, "fog");
     loc->fullbright = GetShaderLocation(shader, "fullbright");
@@ -33,26 +34,31 @@ bool WorldRenderer::LoadShaders(bool fromDisk) {
 }
 
 void WorldRenderer::Unload() {
-  for (Shader s : {world, sky})
+  for (Shader s : {shaders.world, shaders.alpha, shaders.sky})
     if (s.id > 0)
       UnloadShader(s);
-  world = sky = Shader{};
+  shaders = SurfaceShaders{};
+}
+
+std::array<std::pair<Shader, WorldRenderer::Locations *>, 3> WorldRenderer::all() {
+  return {std::pair{shaders.world, &worldLoc}, std::pair{shaders.alpha, &alphaLoc},
+          std::pair{shaders.sky, &skyLoc}};
 }
 
 void WorldRenderer::setWireframe(bool on) {
-  setFloat(world, worldLoc.wireframe, on ? 1.0f : 0.0f);
-  setFloat(sky, skyLoc.wireframe, on ? 1.0f : 0.0f);
+  for (auto [shader, loc] : all())
+    setFloat(shader, loc->wireframe, on ? 1.0f : 0.0f);
 }
 
 void WorldRenderer::Draw(const std::vector<Model> &models, const Camera &camera, const ViewSettings &view) {
   const auto &fog = view.fog;
   float fogValue[4] = {fog.color.x, fog.color.y, fog.color.z, fog.enabled ? fog.density : 0.0f};
-  for (auto [shader, loc] : {std::pair{world, worldLoc}, std::pair{sky, skyLoc}}) {
-    SetShaderValue(shader, loc.viewPos, &camera.position, SHADER_UNIFORM_VEC3);
-    SetShaderValue(shader, loc.fog, fogValue, SHADER_UNIFORM_VEC4);
-    setFloat(shader, loc.fullbright, view.fullbright ? 1.0f : 0.0f);
-    setFloat(shader, loc.time, (float)GetTime());
-    setFloat(shader, loc.skyFog, fog.skyFog);
+  for (auto [shader, loc] : all()) {
+    SetShaderValue(shader, loc->viewPos, &camera.position, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shader, loc->fog, fogValue, SHADER_UNIFORM_VEC4);
+    setFloat(shader, loc->fullbright, view.fullbright ? 1.0f : 0.0f);
+    setFloat(shader, loc->time, (float)GetTime());
+    setFloat(shader, loc->skyFog, fog.skyFog);
   }
   setWireframe(false);
 

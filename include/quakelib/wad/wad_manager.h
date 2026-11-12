@@ -59,7 +59,7 @@ namespace quakelib::wad {
     QuakeTexture *FindTexture(const std::string &name);
 
   private:
-    std::vector<QuakeWadPtr> wads; ///< List of managed WAD files.
+    std::vector<QuakeWadPtr> wads;  ///< List of managed WAD files.
     std::vector<std::string> files; ///< canonical paths, same order as wads
   };
 

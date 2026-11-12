@@ -11,6 +11,8 @@ namespace quakelib::wad {
     for (int idx = size - 1; idx >= 0; idx--) {
       int index = buff[w + (h * width)];
       auto rgba = pal.GetColor(index);
+      if (hasAlpha && index == 255)
+        rgba = color{{0, 0, 0, 0}};
       raw[k] = rgba;
       if (Palette::IsFullbright(index)) {
         emission[k] = rgba;
