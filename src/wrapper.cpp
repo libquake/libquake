@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-// the C# bindings (QuakeKit Unity package, NativeQFTypes.cs) check the same sizes
+// the C# bindings (LibQuake Unity package, NativeQFTypes.cs) check the same sizes
 static_assert(sizeof(QLibVertex) == 56);
 static_assert(sizeof(QLibSubmesh) == 24);
 static_assert(sizeof(QLibSolidEntityInfo) == 64);

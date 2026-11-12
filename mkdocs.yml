@@ -1,8 +1,8 @@
 site_name: libquake
 site_description: C++ library for Quake 1 map, bsp and wad files
 site_author: Tino Gohlert
-repo_url: https://github.com/QuakeKit/libquake
-repo_name: QuakeKit/libquake
+repo_url: https://github.com/libquake/libquake
+repo_name: libquake/libquake
 
 docs_dir: docs
 

@@ -19,7 +19,7 @@ collision hulls, entities, RGBA textures and lightmaps split by light style, and
 - `.map`: standard and Valve 220 format, CSG, texture and lightmap uvs, light baking
 - `.bsp`: version 29 with `.lit` files, embedded textures, light styles
 - `.wad`: WAD2 textures with fullbright emission maps and split sky layers
-- C API for bindings, used by the QuakeKit Unity importer
+- C API for bindings, used by the LibQuake Unity plugin
 
 ```cpp
 #include <quakelib/bsp/bsp_level.h>

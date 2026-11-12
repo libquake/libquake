@@ -130,7 +130,7 @@ jobs:
     steps:
       - name: Trigger Unity sync
         run: |
-          gh api repos/QuakeKit/Unity/dispatches \
+          gh api repos/libquake/unity/dispatches \
             -f event_type=libquake-release \
             -f client_payload[version]="${{ needs.release.outputs.out_tag }}"
         env:
