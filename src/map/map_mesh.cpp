@@ -1,6 +1,7 @@
 #include "map_mesh.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstring>
 #include <tuple>
@@ -211,6 +212,28 @@ namespace quakelib::detail {
     height = (int)atlas->height;
     xatlas::Destroy(atlas);
     return true;
+  }
+
+  std::optional<Vec3> OriginBrushCenter(map::SolidMapEntity &entity, const std::vector<std::string> &textures) {
+    Vec3 mn{FLT_MAX, FLT_MAX, FLT_MAX}, mx{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+    bool found = false;
+    for (const auto &brush : entity.GetOriginalBrushes()) {
+      bool origin = !brush.Faces().empty();
+      for (const auto &f : brush.Faces())
+        origin &= baseLowerName(textureName(textures, f->TextureID())) == "origin";
+      if (!origin)
+        continue;
+      for (const auto &f : brush.Faces())
+        for (const auto &v : f->Vertices())
+          for (int k = 0; k < 3; k++) {
+            mn[k] = std::min(mn[k], v.point[k]);
+            mx[k] = std::max(mx[k], v.point[k]);
+          }
+      found = true;
+    }
+    if (!found || mn[0] > mx[0])
+      return std::nullopt;
+    return (mn + mx) * 0.5f;
   }
 
   std::vector<CollisionHull> BuildCollisionHulls(map::SolidMapEntity &entity,

@@ -12,6 +12,13 @@
 
 namespace quakelib {
 
+  /// the origin of a brush entity's meshes and hulls, EntityGeometry::pivot
+  enum class PivotMode {
+    MapOrigin,    ///< 0 0 0, the geometry stays in map coordinates
+    Center,       ///< center of the entity's bounds
+    BottomCenter, ///< center of the bottom of the entity's bounds
+  };
+
   struct MapBuildOptions {
     /// remove faces hidden inside other brushes of the same entity
     bool csg = true;
@@ -30,13 +37,17 @@ namespace quakelib {
     std::vector<BakeLight> extraLights;
     /// shadow casters in addition to the map's brushes, e.g. a neighbouring map segment
     BakeOccluders extraOccluders;
+    /// pivot of the brush entities, the worldspawn always stays at the map origin. An "origin" brush in an
+    /// entity wins, as in the Quake tools, then the entity's key "_pivot": "origin", "center" or "bottom".
+    PivotMode pivot = PivotMode::MapOrigin;
   };
 
   /**
    * @brief Turns a parsed map into meshes, collision hulls and (optionally) a baked lightmap.
    *
    * Every brush entity (and the worldspawn) gets one EntityGeometry with a mesh per texture and one convex
-   * hull per brush. Geometry is in Quake coordinates unless convertToOpenGL is set.
+   * hull per brush, relative to the entity's pivot. Geometry is in Quake coordinates unless convertToOpenGL is set,
+   * the lightmap layout and the bake in map coordinates.
    *
    * @param layoutOut the planar lightmap layout (charts with content keys), if wanted
    */

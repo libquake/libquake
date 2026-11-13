@@ -61,8 +61,18 @@ the entity's classname to decide what it does.
 
 ## Brush entities
 
-Each brush entity gets its own `EntityGeometry` in world coordinates with a zero pivot. Origin brushes
-are not evaluated yet.
+Each brush entity gets its own `EntityGeometry`, its meshes and hulls relative to the entity's pivot.
+`MapBuildOptions::pivot` chooses it:
+
+| `PivotMode` | Pivot |
+|---|---|
+| `MapOrigin` (default) | `0 0 0`, the geometry stays in world coordinates |
+| `Center` | center of the entity's bounds |
+| `BottomCenter` | center of the bottom of the bounds, for props that stand on the floor |
+
+An entity's key `_pivot` (`origin`, `center` or `bottom`) overrides the option, and an `origin` brush wins
+over both, as in the Quake tools: its center is the pivot. The worldspawn always stays at `0 0 0`. Lightmap
+layout and bake work in world coordinates, the geometry moves to the pivot after them.
 
 CSG only removes faces between brushes of the same entity. `func_group` and `func_detail` are separate
 entities and are not merged with the world.

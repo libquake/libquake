@@ -77,3 +77,4 @@ Level BuildMap(const MapDocument &doc, const MapBuildOptions &options = {},
 | `std::optional<BakeOptions> bakeOptions` | from worldspawn | |
 | `std::vector<BakeLight> extraLights` | empty | Quake coordinates |
 | `BakeOccluders extraOccluders` | empty | Quake coordinates |
+| `PivotMode pivot` | `MapOrigin` | pivot of brush entities, see [Maps](../guide/map.md#brush-entities) |

@@ -49,6 +49,41 @@ namespace quakelib {
         geo.boundsMax = mx;
       }
     }
+
+    PivotMode pivotMode(const LevelEntity &ent, PivotMode fallback) {
+      const std::string &key = ent.Get("_pivot");
+      if (key == "origin")
+        return PivotMode::MapOrigin;
+      if (key == "center")
+        return PivotMode::Center;
+      if (key == "bottom")
+        return PivotMode::BottomCenter;
+      return fallback;
+    }
+
+    Vec3 pivotOf(const EntityGeometry &geo, PivotMode mode) {
+      Vec3 center = (geo.boundsMin + geo.boundsMax) * 0.5f;
+      switch (mode) {
+      case PivotMode::Center:
+        return center;
+      case PivotMode::BottomCenter:
+        return Vec3{center[0], center[1], geo.boundsMin[2]};
+      default:
+        return Vec3{0, 0, 0};
+      }
+    }
+
+    void moveToPivot(EntityGeometry &geo, const Vec3 &pivot) {
+      for (auto &m : geo.meshes)
+        for (auto &v : m.vertices)
+          v.point = v.point - pivot;
+      for (auto &h : geo.hulls)
+        for (auto &p : h.points)
+          p = p - pivot;
+      geo.boundsMin = geo.boundsMin - pivot;
+      geo.boundsMax = geo.boundsMax - pivot;
+      geo.pivot = pivot;
+    }
   } // namespace
 
   Level BuildMap(const MapDocument &doc, const MapBuildOptions &options, LightmapLayout *layoutOut) {
@@ -94,6 +129,7 @@ namespace quakelib {
     // brush entities of the document and the solid map entities are in the same order
     const auto &solids = qmap.SolidEntities();
     std::vector<map::SolidMapEntity *> casters;
+    std::vector<Vec3> pivots;
     size_t solid = 0;
     for (const auto &e : doc.entities) {
       level.entities.push_back(e.properties);
@@ -107,6 +143,12 @@ namespace quakelib {
       geo.meshes = detail::BuildEntityMeshes(se, textures);
       geo.hulls = detail::BuildCollisionHulls(se, textures);
       setBounds(geo);
+      if (ent.classname != "worldspawn") {
+        auto origin = detail::OriginBrushCenter(se, textures);
+        pivots.push_back(origin ? *origin : pivotOf(geo, pivotMode(ent, options.pivot)));
+      } else {
+        pivots.push_back(Vec3{0, 0, 0});
+      }
       ent.geometry = (int)level.geometry.size();
       level.geometry.push_back(std::move(geo));
       if (detail::CastsShadows(ent))
@@ -141,6 +183,10 @@ namespace quakelib {
       if (layoutOut)
         *layoutOut = std::move(layout);
     }
+
+    // after the lightmap, its layout and bake work in map coordinates
+    for (size_t i = 0; i < level.geometry.size(); i++)
+      moveToPivot(level.geometry[i], pivots[i]);
 
     level.wads = doc.wads;
     if (options.convertToOpenGL)

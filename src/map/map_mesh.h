@@ -4,6 +4,7 @@
 #include <quakelib/lightmap_baker.h>
 #include <quakelib/lightmap_layout.h>
 #include <quakelib/map/entities.h>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,9 @@ namespace quakelib::detail {
   /// one convex hull per original brush, hint / origin brushes are left out
   std::vector<CollisionHull> BuildCollisionHulls(map::SolidMapEntity &entity,
                                                  const std::vector<std::string> &textures);
+
+  /// center of the entity's "origin" brushes, the rotation and placement origin in the Quake tools
+  std::optional<Vec3> OriginBrushCenter(map::SolidMapEntity &entity, const std::vector<std::string> &textures);
 
   /// func_group / func_detail are part of the world for the quake compilers, other brush entities only cast
   /// shadows with "_shadow" "1", like in ericw-tools

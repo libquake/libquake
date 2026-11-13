@@ -609,3 +609,65 @@ TEST_CASE("spot lights read their cone angle", "[map/lightmap]") {
   REQUIRE(lights[0].coneAngle == 20);
   REQUIRE(lights[0].direction[2] < -0.99f);
 }
+
+namespace {
+  std::string box(Vec3 a, Vec3 b, const std::string &tex) {
+    auto p = [](float x, float y, float z) {
+      return "( " + std::to_string((int)x) + " " + std::to_string((int)y) + " " + std::to_string((int)z) + " ) ";
+    };
+    auto face = [&](const std::string &points) { return points + tex + " 0 0 0 1 1\n"; };
+    return "{\n" + face(p(a[0], 0, 0) + p(a[0], 1, 0) + p(a[0], 0, 1)) +
+           face(p(b[0], 0, 0) + p(b[0], 0, 1) + p(b[0], 1, 0)) + face(p(0, a[1], 0) + p(0, a[1], 1) + p(1, a[1], 0)) +
+           face(p(0, b[1], 0) + p(1, b[1], 0) + p(0, b[1], 1)) + face(p(0, 0, a[2]) + p(1, 0, a[2]) + p(0, 1, a[2])) +
+           face(p(0, 0, b[2]) + p(0, 1, b[2]) + p(1, 0, b[2])) + "}\n";
+  }
+} // namespace
+
+TEST_CASE("brush entity pivots", "[map/level]") {
+  std::string text = "{\n\"classname\" \"worldspawn\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") + "}\n";
+  text += "{\n\"classname\" \"func_wall\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") + "}\n";
+  text += "{\n\"classname\" \"func_wall\"\n\"_pivot\" \"center\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") + "}\n";
+  text += "{\n\"classname\" \"func_door\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") +
+          box({0, 0, 0}, {16, 16, 16}, "origin") + "}\n";
+  auto doc = ParseMapText(text);
+
+  auto lowest = [](const EntityGeometry &g) {
+    float z = 1e9f;
+    for (const auto &m : g.meshes)
+      for (const auto &v : m.vertices)
+        z = std::min(z, v.point[2]);
+    return z;
+  };
+
+  // the default keeps everything in map coordinates
+  Level plain = BuildMap(doc);
+  REQUIRE(plain.geometry[1].pivot[0] == 0);
+  REQUIRE(lowest(plain.geometry[1]) == 16);
+
+  MapBuildOptions opts;
+  opts.pivot = PivotMode::BottomCenter;
+  Level level = BuildMap(doc, opts);
+  const auto &world = level.geometry[0];
+  REQUIRE(world.pivot[0] == 0);
+  REQUIRE(world.pivot[2] == 0);
+
+  const auto &bottom = level.geometry[1];
+  REQUIRE(bottom.pivot[0] == 96);
+  REQUIRE(bottom.pivot[1] == 16);
+  REQUIRE(bottom.pivot[2] == 16);
+  REQUIRE(lowest(bottom) == 0);
+  REQUIRE(bottom.boundsMin[2] == 0);
+  for (const auto &h : bottom.hulls)
+    for (const auto &p : h.points)
+      REQUIRE(std::abs(p[0]) <= 32);
+
+  // the entity's key overrides the option
+  REQUIRE(level.geometry[2].pivot[2] == 32);
+
+  // an origin brush wins and is neither drawn nor solid
+  const auto &door = level.geometry[3];
+  REQUIRE(door.pivot[0] == 8);
+  REQUIRE(door.pivot[1] == 8);
+  REQUIRE(door.pivot[2] == 8);
+  REQUIRE(door.hulls.size() == 1);
+}
