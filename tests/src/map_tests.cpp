@@ -678,3 +678,34 @@ TEST_CASE("brush entity pivots", "[map/level]") {
   REQUIRE(door.pivot[2] == 8);
   REQUIRE(door.hulls.size() == 1);
 }
+
+TEST_CASE("trenchbroom groups as one geometry", "[map/level]") {
+  std::string text = "{\n\"classname\" \"worldspawn\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") + "}\n";
+  text += "{\n\"classname\" \"func_group\"\n\"_tb_type\" \"_tb_group\"\n\"_tb_id\" \"1\"\n" +
+          box({0, 0, 0}, {32, 32, 32}, "ground1") + "}\n";
+  text += "{\n\"classname\" \"func_detail\"\n\"_tb_group\" \"1\"\n" + box({32, 0, 0}, {64, 32, 16}, "ground1") +
+          "}\n";
+  // a nested group goes into the outermost one
+  text += "{\n\"classname\" \"func_group\"\n\"_tb_type\" \"_tb_group\"\n\"_tb_id\" \"2\"\n\"_tb_group\" \"1\"\n" +
+          box({0, 32, 0}, {32, 64, 64}, "ground1") + "}\n";
+  auto doc = ParseMapText(text);
+
+  Level separate = BuildMap(doc);
+  REQUIRE(separate.entities[2].geometry >= 0);
+
+  MapBuildOptions opts;
+  opts.mergeGroups = true;
+  opts.pivot = PivotMode::BottomCenter;
+  Level level = BuildMap(doc, opts);
+  REQUIRE(level.entities[2].geometry < 0);
+  REQUIRE(level.entities[3].geometry < 0);
+  const auto &group = level.geometry[level.entities[1].geometry];
+  REQUIRE(group.hulls.size() == 3);
+  REQUIRE(group.meshes.size() == 1);
+  // the pivot is the bottom center of the whole group, 0..64 on x and y
+  REQUIRE(group.pivot[0] == 32);
+  REQUIRE(group.pivot[1] == 32);
+  REQUIRE(group.pivot[2] == 0);
+  // the world stays apart
+  REQUIRE(level.geometry[level.entities[0].geometry].hulls.size() == 1);
+}

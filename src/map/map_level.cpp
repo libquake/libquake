@@ -77,6 +77,63 @@ namespace quakelib {
       }
     }
 
+    /// adds the meshes and hulls of from to into, a mesh with the same texture and type takes the other's triangles
+    void appendGeometry(EntityGeometry &into, EntityGeometry &&from) {
+      for (auto &mesh : from.meshes) {
+        auto same = std::find_if(into.meshes.begin(), into.meshes.end(), [&mesh](const RenderMesh &m) {
+          return m.textureName == mesh.textureName && m.type == mesh.type;
+        });
+        if (same == into.meshes.end()) {
+          into.meshes.push_back(std::move(mesh));
+          continue;
+        }
+        auto offset = (uint32_t)same->vertices.size();
+        same->vertices.insert(same->vertices.end(), mesh.vertices.begin(), mesh.vertices.end());
+        for (uint32_t i : mesh.indices)
+          same->indices.push_back(i + offset);
+      }
+      for (auto &hull : from.hulls)
+        into.hulls.push_back(std::move(hull));
+      from = EntityGeometry{};
+    }
+
+    /// see MapBuildOptions::mergeGroups, owners maps each geometry to its entity and grows with new ones
+    void mergeGroups(Level &level, std::vector<int> &owners) {
+      std::map<std::string, int> groups;
+      for (int i = 0; i < (int)level.entities.size(); i++) {
+        const auto &ent = level.entities[i];
+        if (ent.Get("_tb_type") == "_tb_group")
+          groups[ent.Get("_tb_id")] = i;
+      }
+
+      auto outermost = [&](int i) {
+        for (size_t depth = 0; depth < groups.size(); depth++) {
+          auto parent = groups.find(level.entities[i].Get("_tb_group"));
+          if (parent == groups.end())
+            break;
+          i = parent->second;
+        }
+        return i;
+      };
+
+      for (int i = 0; i < (int)level.entities.size(); i++) {
+        int group = outermost(i);
+        if (group == i || level.entities[i].geometry < 0)
+          continue;
+
+        // a group of entities only has no brushes of its own
+        if (level.entities[group].geometry < 0) {
+          level.entities[group].geometry = (int)level.geometry.size();
+          level.geometry.emplace_back();
+          owners.push_back(group);
+        }
+        appendGeometry(level.geometry[level.entities[group].geometry],
+                       std::move(level.geometry[level.entities[i].geometry]));
+        level.entities[i].geometry = -1;
+        setBounds(level.geometry[level.entities[group].geometry]);
+      }
+    }
+
     void moveToPivot(EntityGeometry &geo, const Vec3 &pivot) {
       for (auto &m : geo.meshes)
         for (auto &v : m.vertices)
@@ -133,7 +190,9 @@ namespace quakelib {
     // brush entities of the document and the solid map entities are in the same order
     const auto &solids = qmap.SolidEntities();
     std::vector<map::SolidMapEntity *> casters;
-    std::vector<Vec3> pivots;
+    // by geometry: the entity it belongs to and the center of its origin brush, if it has one
+    std::vector<int> owners;
+    std::map<int, Vec3> originBrushes;
     size_t solid = 0;
     for (const auto &e : doc.entities) {
       level.entities.push_back(e.properties);
@@ -147,17 +206,17 @@ namespace quakelib {
       geo.meshes = detail::BuildEntityMeshes(se, textures);
       geo.hulls = detail::BuildCollisionHulls(se, textures);
       setBounds(geo);
-      if (ent.classname != "worldspawn") {
-        auto origin = detail::OriginBrushCenter(se, textures);
-        pivots.push_back(origin ? *origin : pivotOf(geo, pivotMode(ent, options.pivot)));
-      } else {
-        pivots.push_back(Vec3{0, 0, 0});
-      }
+      if (auto origin = detail::OriginBrushCenter(se, textures))
+        originBrushes[(int)level.geometry.size()] = *origin;
+      owners.push_back((int)level.entities.size() - 1);
       ent.geometry = (int)level.geometry.size();
       level.geometry.push_back(std::move(geo));
       if (detail::CastsShadows(ent))
         casters.push_back(&se);
     }
+
+    if (options.mergeGroups)
+      mergeGroups(level, owners);
 
     if (options.lightmapUV.method == LightmapUVOptions::Method::XAtlas) {
       for (auto &geo : level.geometry) {
@@ -189,8 +248,14 @@ namespace quakelib {
     }
 
     // after the lightmap, its layout and bake work in map coordinates
-    for (size_t i = 0; i < level.geometry.size(); i++)
-      moveToPivot(level.geometry[i], pivots[i]);
+    for (size_t i = 0; i < level.geometry.size(); i++) {
+      const auto &owner = level.entities[owners[i]];
+      auto origin = originBrushes.find((int)i);
+      Vec3 pivot = owner.classname == "worldspawn" ? Vec3{0, 0, 0}
+                   : origin != originBrushes.end()  ? origin->second
+                                                    : pivotOf(level.geometry[i], pivotMode(owner, options.pivot));
+      moveToPivot(level.geometry[i], pivot);
+    }
 
     level.wads = doc.wads;
     if (options.convertToOpenGL)

@@ -75,5 +75,9 @@ An entity's key `_pivot` (`origin`, `center`, `bottom` or `corner`) overrides th
 over both, as in the Quake tools: its center is the pivot. The worldspawn always stays at `0 0 0`. Lightmap
 layout and bake work in world coordinates, the geometry moves to the pivot after them.
 
+With `MapBuildOptions::mergeGroups` each TrenchBroom group becomes one geometry, e.g. for a map of props: the
+brush entities in a group (key `_tb_group`) join the group's own `func_group`, nested groups the outermost one,
+and keep no geometry of their own. The pivot is then the one of the whole group.
+
 CSG only removes faces between brushes of the same entity. `func_group` and `func_detail` are separate
 entities and are not merged with the world.

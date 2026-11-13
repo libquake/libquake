@@ -42,6 +42,10 @@ namespace quakelib {
     /// entity wins, as in the Quake tools, then the entity's key "_pivot": "origin", "center", "bottom" or
     /// "corner".
     PivotMode pivot = PivotMode::MapOrigin;
+    /// TrenchBroom groups become one geometry each, e.g. for a map of props: the brush entities in a group (key
+    /// "_tb_group") are added to the group's own func_group, nested groups to the outermost one, and keep no
+    /// geometry of their own. Meshes with the same texture are joined.
+    bool mergeGroups = false;
   };
 
   /**
