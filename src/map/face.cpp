@@ -170,7 +170,7 @@ namespace quakelib::map {
       };
       const auto &a = axes[standardAxis()][0];
       const auto &b = axes[standardAxis()][1];
-      double angle = m_rotation * (M_PI / 180.0);
+      double angle = m_rotation * (HMM_PI / 180.0);
       double c = std::cos(angle), s = std::sin(angle);
       gradU = (a * c - b * s) * (1.0 / m_scaleX);
       gradV = (a * s + b * c) * (1.0 / m_scaleY);
@@ -207,7 +207,7 @@ namespace quakelib::map {
       break;
     }
 
-    float angle = (float)(m_rotation * (M_PI / 180));
+    float angle = (float)(m_rotation * (HMM_PI / 180));
     uvOut =
         Vec2{uvOut[0] * cos(angle) - uvOut[1] * sin(angle), uvOut[0] * sin(angle) + uvOut[1] * cos(angle)};
 

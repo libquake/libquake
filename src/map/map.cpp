@@ -1,5 +1,6 @@
 #include <quakelib/map/map.h>
 
+#include <algorithm>
 #include <iostream>
 
 namespace quakelib::map {

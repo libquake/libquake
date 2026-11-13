@@ -5,9 +5,6 @@
 
 namespace quakelib::math {
   const float CMP_EPSILON = 0.008f;
-#ifndef M_PI
-  const double M_PI = 3.14159265358979323846;
-#endif
 
   using Vec2 = HMM_Vec2;
   using Vec3 = HMM_Vec3;

@@ -6,6 +6,7 @@
 #include <quakelib/map/map_level.h>
 #include <quakelib/map/qmap_provider.h>
 
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <snitch/snitch.hpp>

@@ -77,8 +77,8 @@ namespace quakelib {
         return Vec3{0, 0, -1};
     }
     Vec3 ang = Angles();
-    double pitch = ang[0] * (M_PI / 180.0);
-    double yaw = ang[1] * (M_PI / 180.0);
+    double pitch = ang[0] * (HMM_PI / 180.0);
+    double yaw = ang[1] * (HMM_PI / 180.0);
     return Vec3{(float)(std::cos(pitch) * std::cos(yaw)), (float)(std::cos(pitch) * std::sin(yaw)),
                 (float)-std::sin(pitch)};
   }

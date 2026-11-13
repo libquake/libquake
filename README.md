@@ -39,6 +39,9 @@ cmake --build build
 ./build/bin/tests/quakelib_unit_tests
 ```
 
+On Windows with Visual Studio, build with `cmake --build build --config Release`, the binaries land in
+`Release` subfolders (`build/bin/tests/Release/quakelib_unit_tests.exe`).
+
 `QLIB_BUILD_VIEWER`, `QLIB_BUILD_TESTS` (both on) and `QLIB_BUILD_EXAMPLES` (off) select what is built
 besides the library.
 

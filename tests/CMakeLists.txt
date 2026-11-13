@@ -34,6 +34,14 @@ add_custom_command(
     COMMENT "Copying test data files"
 )
 
+# Windows looks for dlls next to the executable
+if(WIN32)
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:quakelib> $<TARGET_FILE_DIR:${PROJECT_NAME}>
+    )
+endif()
+
 add_custom_command(
     TARGET ${PROJECT_NAME}
     COMMENT "RUN QUAKELIB TESTS"

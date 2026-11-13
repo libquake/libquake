@@ -356,11 +356,11 @@ namespace quakelib {
                 continue;
               if (l.type == BakeLight::Type::Spot) {
                 float c = math::Dot(toLight * -1.0f, l.direction);
-                float outer = std::cos(l.coneAngle * 0.5f * (float)M_PI / 180.0f);
+                float outer = std::cos(l.coneAngle * 0.5f * (float)HMM_PI / 180.0f);
                 if (c < outer)
                   continue;
                 if (l.softAngle > 0 && l.softAngle < l.coneAngle) {
-                  float inner = std::cos(l.softAngle * 0.5f * (float)M_PI / 180.0f);
+                  float inner = std::cos(l.softAngle * 0.5f * (float)HMM_PI / 180.0f);
                   if (c < inner)
                     value *= (c - outer) / (inner - outer);
                 }
@@ -424,7 +424,7 @@ namespace quakelib {
     Vec3 mangleDirection(const std::string &s) {
       auto f = floats(s);
       float yaw = f.size() > 0 ? f[0] : 0, pitch = f.size() > 1 ? f[1] : 0;
-      float y = yaw * (float)M_PI / 180.0f, p = pitch * (float)M_PI / 180.0f;
+      float y = yaw * (float)HMM_PI / 180.0f, p = pitch * (float)HMM_PI / 180.0f;
       return Vec3{std::cos(y) * std::cos(p), std::sin(y) * std::cos(p), std::sin(p)};
     }
   } // namespace

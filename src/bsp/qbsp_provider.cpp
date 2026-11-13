@@ -165,7 +165,7 @@ namespace quakelib {
         bool sky = tName.rfind("sky", 0) == 0;
         bool emissive = false;
         td.emission.assign(td.data.size(), 0);
-        for (int i = 0; i < tex.width * tex.height; ++i) {
+        for (uint32_t i = 0; i < tex.width * tex.height; ++i) {
           auto c = pal.GetColor(tex.data[i]);
           td.data[i * 4 + 0] = c.rgba[0];
           td.data[i * 4 + 1] = c.rgba[1];
