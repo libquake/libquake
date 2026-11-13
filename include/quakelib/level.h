@@ -66,6 +66,8 @@ namespace quakelib {
       Liquid, ///< water, slime, lava (textures starting with '*'), a volume rather than a wall
     };
     Type type = Type::Solid;
+    /// liquids: the liquid texture as in the map, e.g. "*water1", "*slime0" or "*lava1". Empty otherwise.
+    std::string textureName;
     std::vector<Vec3> points;      ///< hull corners, no duplicates
     std::vector<uint32_t> indices; ///< triangles, same winding as the render meshes
   };

@@ -401,6 +401,7 @@ TEST_CASE("tool textures and collision hulls", "[map/collision]") {
     solid += h.type == CollisionHull::Type::Solid;
     clip += h.type == CollisionHull::Type::Clip;
     liquid += h.type == CollisionHull::Type::Liquid;
+    REQUIRE((h.type == CollisionHull::Type::Liquid) == (h.textureName == "*water1"));
   }
   // ground + nodraw are solid, the hint brush is left out
   REQUIRE(solid == 2);

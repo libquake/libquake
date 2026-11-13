@@ -240,10 +240,12 @@ namespace quakelib::detail {
                                                  const std::vector<std::string> &textures) {
     std::vector<CollisionHull> hulls;
     for (const auto &brush : entity.GetOriginalBrushes()) {
-      bool liquid = false, allClip = true, allNonSolid = true;
+      bool allClip = true, allNonSolid = true;
+      std::string liquid;
       for (const auto &f : brush.Faces()) {
         std::string name = baseLowerName(textureName(textures, f->TextureID()));
-        liquid |= IsLiquidTexture(name);
+        if (liquid.empty() && IsLiquidTexture(name))
+          liquid = textureName(textures, f->TextureID());
         allClip &= f->Type() == map::MapSurface::CLIP;
         allNonSolid &= name == "hint" || name == "hintskip" || name == "origin";
       }
@@ -251,9 +253,10 @@ namespace quakelib::detail {
         continue;
 
       CollisionHull hull;
-      hull.type = liquid    ? CollisionHull::Type::Liquid
-                  : allClip ? CollisionHull::Type::Clip
-                            : CollisionHull::Type::Solid;
+      hull.type = !liquid.empty() ? CollisionHull::Type::Liquid
+                  : allClip       ? CollisionHull::Type::Clip
+                                  : CollisionHull::Type::Solid;
+      hull.textureName = liquid;
       std::map<std::tuple<float, float, float>, uint32_t> lookup;
       for (const auto &f : brush.Faces()) {
         const auto &verts = f->Vertices();

@@ -71,6 +71,7 @@ Values are never converted to OpenGL coordinates.
 | Member | |
 |---|---|
 | `Type type` | `Solid`, `Clip` (only clip faces) or `Liquid` (a `*` texture) |
+| `std::string textureName` | liquids: the liquid texture as in the map (`*water1`, `*slime0`, `*lava1`), empty otherwise |
 | `std::vector<Vec3> points` | corners without duplicates |
 | `std::vector<uint32_t> indices` | triangles, same winding as the meshes |
 
