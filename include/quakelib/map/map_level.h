@@ -17,6 +17,7 @@ namespace quakelib {
     MapOrigin,    ///< 0 0 0, the geometry stays in map coordinates
     Center,       ///< center of the entity's bounds
     BottomCenter, ///< center of the bottom of the entity's bounds
+    BottomCorner, ///< the lowest corner of the entity's bounds (smallest x, y and z), snaps to any grid
   };
 
   struct MapBuildOptions {
@@ -38,7 +39,8 @@ namespace quakelib {
     /// shadow casters in addition to the map's brushes, e.g. a neighbouring map segment
     BakeOccluders extraOccluders;
     /// pivot of the brush entities, the worldspawn always stays at the map origin. An "origin" brush in an
-    /// entity wins, as in the Quake tools, then the entity's key "_pivot": "origin", "center" or "bottom".
+    /// entity wins, as in the Quake tools, then the entity's key "_pivot": "origin", "center", "bottom" or
+    /// "corner".
     PivotMode pivot = PivotMode::MapOrigin;
   };
 

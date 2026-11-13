@@ -664,6 +664,13 @@ TEST_CASE("brush entity pivots", "[map/level]") {
   // the entity's key overrides the option
   REQUIRE(level.geometry[2].pivot[2] == 32);
 
+  // the lowest corner snaps to any grid
+  opts.pivot = PivotMode::BottomCorner;
+  Level corner = BuildMap(doc, opts);
+  REQUIRE(corner.geometry[1].pivot[0] == 64);
+  REQUIRE(corner.geometry[1].pivot[1] == 0);
+  REQUIRE(corner.geometry[1].pivot[2] == 16);
+
   // an origin brush wins and is neither drawn nor solid
   const auto &door = level.geometry[3];
   REQUIRE(door.pivot[0] == 8);

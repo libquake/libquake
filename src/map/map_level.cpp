@@ -58,6 +58,8 @@ namespace quakelib {
         return PivotMode::Center;
       if (key == "bottom")
         return PivotMode::BottomCenter;
+      if (key == "corner")
+        return PivotMode::BottomCorner;
       return fallback;
     }
 
@@ -68,6 +70,8 @@ namespace quakelib {
         return center;
       case PivotMode::BottomCenter:
         return Vec3{center[0], center[1], geo.boundsMin[2]};
+      case PivotMode::BottomCorner:
+        return geo.boundsMin;
       default:
         return Vec3{0, 0, 0};
       }

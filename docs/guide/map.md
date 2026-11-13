@@ -69,8 +69,9 @@ Each brush entity gets its own `EntityGeometry`, its meshes and hulls relative t
 | `MapOrigin` (default) | `0 0 0`, the geometry stays in world coordinates |
 | `Center` | center of the entity's bounds |
 | `BottomCenter` | center of the bottom of the bounds, for props that stand on the floor |
+| `BottomCorner` | the lowest corner of the bounds (smallest x, y and z), for modular pieces that snap to a grid |
 
-An entity's key `_pivot` (`origin`, `center` or `bottom`) overrides the option, and an `origin` brush wins
+An entity's key `_pivot` (`origin`, `center`, `bottom` or `corner`) overrides the option, and an `origin` brush wins
 over both, as in the Quake tools: its center is the pivot. The worldspawn always stays at `0 0 0`. Lightmap
 layout and bake work in world coordinates, the geometry moves to the pivot after them.
 
