@@ -1,6 +1,6 @@
 # Loading a bsp
 
-Quake 1 bsp files (version 29) are supported, BSP2 is not. A `.lit` file next to the bsp is picked up for colored light.
+Quake 1 bsp files of version 29 and BSP2 (the format with 32 bit indices for big maps) are supported. A `.lit` file next to the bsp is picked up for colored light.
 
 ```cpp
 --8<-- "examples/load_bsp.cpp:load"

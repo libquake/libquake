@@ -14,6 +14,74 @@ namespace quakelib::bsp {
     return true;
   }
 
+  // a BSP2 file holds these structs as they are
+  static_assert(sizeof(fEdge_t) == 8 && sizeof(fFace_t) == 28 && sizeof(fNode_t) == 44 &&
+                sizeof(fLeaf_t) == 44);
+
+  namespace {
+    /// the lumps of version 29 with 16 bit indices and bounds, see bsp_file.h for the fields
+    namespace v29 {
+      struct edge {
+        uint16_t vertex0, vertex1;
+      };
+
+      struct face {
+        uint16_t plane_id, side;
+        uint32_t ledge_id;
+        uint16_t ledge_num, texinfo_id;
+        unsigned char light[4];
+        int32_t lightmap;
+      };
+
+      struct node {
+        int32_t plane_id;
+        int16_t front, back;
+        bbox3s_t box;
+        uint16_t face_id, face_num;
+      };
+
+      struct leaf {
+        int32_t type, vislist;
+        bbox3s_t bound;
+        uint16_t lface_id, lface_num;
+        unsigned char ambient[4];
+      };
+    } // namespace v29
+
+    vec3f_t widen(const vec3s_t &v) { return {(float)v.x, (float)v.y, (float)v.z}; }
+
+    bbox3f_t widen(const bbox3s_t &b) { return {widen(b.min), widen(b.max)}; }
+
+    fEdge_t widen(const v29::edge &e) { return {e.vertex0, e.vertex1}; }
+
+    fFace_t widen(const v29::face &f) {
+      return {f.plane_id,  f.side,       f.ledge_id,
+              f.ledge_num, f.texinfo_id, {f.light[0], f.light[1], f.light[2], f.light[3]},
+              f.lightmap};
+    }
+
+    // the children keep their sign, a leaf stays ~index
+    fNode_t widen(const v29::node &n) {
+      return {n.plane_id, n.front, n.back, widen(n.box), n.face_id, n.face_num};
+    }
+
+    fLeaf_t widen(const v29::leaf &l) {
+      return {l.type,       l.vislist,    widen(l.bound), l.lface_id,  l.lface_num,
+              l.ambient[0], l.ambient[1], l.ambient[2],   l.ambient[3]};
+    }
+
+    /// a lump as written by version 29 into the wider structs
+    template <typename Disk, typename T>
+    void loadWidened(std::ifstream &istream, const lump_t &lump, vector<T> &v) {
+      vector<Disk> disk;
+      loadLumptoVector(istream, lump, disk);
+      v.clear();
+      v.reserve(disk.size());
+      for (const auto &d : disk)
+        v.push_back(widen(d));
+    }
+  } // namespace
+
   int QBsp::LoadFile(const char *fileName) {
     m_content.header = header_t{};
     m_istream.open(fileName, std::ios::binary);
@@ -23,23 +91,31 @@ namespace quakelib::bsp {
     if (!m_istream)
       return QBSP_ERR_WRONG_VERSION;
 
-    if (m_content.header.version != MAGIC_V29 && m_content.header.version != MAGIC_V30) {
+    const uint32_t version = m_content.header.version;
+    if (version != MAGIC_V29 && version != MAGIC_V30 && version != MAGIC_BSP2) {
       return QBSP_ERR_WRONG_VERSION;
     }
 
     std::filesystem::path p = fileName;
     m_mapPath = p.replace_extension().string();
 
-    loadLumptoVector(m_istream, m_content.header.lump[LUMP_VERTICES], m_content.vertices);
-    loadLumptoVector(m_istream, m_content.header.lump[LUMP_EDGES], m_content.edges);
-    loadLumptoVector(m_istream, m_content.header.lump[LUMP_FACES], m_content.faces);
-    loadLumptoVector(m_istream, m_content.header.lump[LUMP_TEXINFO], m_content.surfaces);
-    loadLumptoVector(m_istream, m_content.header.lump[LUMP_SURFEDGES], m_content.surfEdges);
-    loadLumptoVector(m_istream, m_content.header.lump[LUMP_MODELS], m_content.models);
-
-    loadLumptoVector(m_istream, m_content.header.lump[LUMP_PLANES], m_content.planes);
-    loadLumptoVector(m_istream, m_content.header.lump[LUMP_NODES], m_content.nodes);
-    loadLumptoVector(m_istream, m_content.header.lump[LUMP_LEAFS], m_content.leafs);
+    const auto &lumps = m_content.header.lump;
+    loadLumptoVector(m_istream, lumps[LUMP_VERTICES], m_content.vertices);
+    loadLumptoVector(m_istream, lumps[LUMP_TEXINFO], m_content.surfaces);
+    loadLumptoVector(m_istream, lumps[LUMP_SURFEDGES], m_content.surfEdges);
+    loadLumptoVector(m_istream, lumps[LUMP_MODELS], m_content.models);
+    loadLumptoVector(m_istream, lumps[LUMP_PLANES], m_content.planes);
+    if (version == MAGIC_BSP2) {
+      loadLumptoVector(m_istream, lumps[LUMP_EDGES], m_content.edges);
+      loadLumptoVector(m_istream, lumps[LUMP_FACES], m_content.faces);
+      loadLumptoVector(m_istream, lumps[LUMP_NODES], m_content.nodes);
+      loadLumptoVector(m_istream, lumps[LUMP_LEAFS], m_content.leafs);
+    } else {
+      loadWidened<v29::edge>(m_istream, lumps[LUMP_EDGES], m_content.edges);
+      loadWidened<v29::face>(m_istream, lumps[LUMP_FACES], m_content.faces);
+      loadWidened<v29::node>(m_istream, lumps[LUMP_NODES], m_content.nodes);
+      loadWidened<v29::leaf>(m_istream, lumps[LUMP_LEAFS], m_content.leafs);
+    }
 
     if (m_config.loadTextures) {
       loadTextureInfo();

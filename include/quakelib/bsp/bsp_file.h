@@ -24,6 +24,8 @@ namespace quakelib::bsp {
 
   const uint32_t MAGIC_V29 = 29;
   const uint32_t MAGIC_V30 = 30;
+  /// "BSP2": version 29 with 32 bit indices and float bounds, for big maps
+  const uint32_t MAGIC_BSP2 = 'B' | ('S' << 8) | ('P' << 16) | ('2' << 24);
 
   const int NUM_HEADER_LUMPS = 15;
   const int MAX_TEXNAME = 16;
@@ -53,9 +55,11 @@ namespace quakelib::bsp {
   };
 
   struct header_t {
-    uint32_t version;              // version of the BSP format (29 or 30)
+    uint32_t version;              // version of the BSP format (29, 30 or MAGIC_BSP2)
     lump_t lump[NUM_HEADER_LUMPS]; // directory of the lumps
   };
+
+  // edges, faces, nodes and leafs have the widths of BSP2, version 29 files are widened while loading
 
   struct fPlane_t {
     vec3f_t normal; // Vector orthogonal to plane (Nx,Ny,Nz)
@@ -66,20 +70,20 @@ namespace quakelib::bsp {
   };
 
   struct fEdge_t {
-    uint16_t vertex0; // index of the start vertex
+    uint32_t vertex0; // index of the start vertex
                       //  must be in [0,numvertices[
-    uint16_t vertex1; // index of the end vertex
+    uint32_t vertex1; // index of the end vertex
                       //  must be in [0,numvertices[
   };
 
   struct fFace_t {
-    uint16_t plane_id;      // The plane in which the face lies
+    int32_t plane_id;       // The plane in which the face lies
                             //           must be in [0,numplanes[
-    uint16_t side;          // 0 if in front of the plane, 1 if behind the plane
+    int32_t side;           // 0 if in front of the plane, 1 if behind the plane
     uint32_t ledge_id;      // first edge in the List of edges
                             //           must be in [0,numledges[
-    uint16_t ledge_num;     // number of edges in the List of edges
-    uint16_t texinfo_id;    // index of the Texture info the face is part of
+    int32_t ledge_num;      // number of edges in the List of edges
+    int32_t texinfo_id;     // index of the Texture info the face is part of
                             //           must be in [0,numtexinfos[
     unsigned char light[4]; // two additional light models
     int32_t lightmap;       // Pointer inside the general light map, or -1
@@ -125,23 +129,23 @@ namespace quakelib::bsp {
   struct fNode_t {
     int plane_id;      // The plane that splits the node
                        //           must be in [0,numplanes[
-    int16_t front;     // If bit15==0, index of Front child node
-                       // If bit15==1, ~front = index of child leaf
-    int16_t back;      // If bit15==0, id of Back child node
-                       // If bit15==1, ~back =  id of child leaf
-    bbox3s_t box;      // Bounding box of node and all childs
-    uint16_t face_id;  // Index of first Polygons in the node
-    uint16_t face_num; // Number of faces in the node
+    int32_t front;     // If >= 0, index of Front child node
+                       // If < 0, ~front = index of child leaf
+    int32_t back;      // If >= 0, id of Back child node
+                       // If < 0, ~back =  id of child leaf
+    bbox3f_t box;      // Bounding box of node and all childs
+    uint32_t face_id;  // Index of first Polygons in the node
+    uint32_t face_num; // Number of faces in the node
   };
 
   struct fLeaf_t {
     int32_t type;           // Special type of leaf
     int32_t vislist;        // Beginning of visibility lists
                             //     must be -1 or in [0,numvislist[
-    bbox3s_t bound;         // Bounding box of the leaf
-    uint16_t lface_id;      // First item of the list of faces
+    bbox3f_t bound;         // Bounding box of the leaf
+    uint32_t lface_id;      // First item of the list of faces
                             //     must be in [0,numlfaces[
-    uint16_t lface_num;     // Number of faces in the leaf
+    uint32_t lface_num;     // Number of faces in the leaf
     unsigned char sndwater; // level of the four ambient sounds:
     unsigned char sndsky;   //   0    is no sound
     unsigned char sndslime; //   0xFF is maximum volume

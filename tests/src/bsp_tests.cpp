@@ -286,3 +286,28 @@ TEST_CASE("bsp sky layers and alpha", "[bsp/level]") {
   REQUIRE_FALSE(level.textures[wallIndex].hasAlpha);
   REQUIRE(level.textures[wallIndex].skyFront.empty());
 }
+
+TEST_CASE("bsp2 loads like version 29", "[bsp/level]") {
+  // lightstyles_bsp2.bsp is lightstyles.bsp with its lumps rewritten in the wider BSP2 layout
+  Level v29 = LoadBsp("tests/data/lightstyles.bsp");
+  Level bsp2 = LoadBsp("tests/data/lightstyles_bsp2.bsp");
+
+  REQUIRE(bsp2.entities.size() == v29.entities.size());
+  REQUIRE(bsp2.geometry.size() == v29.geometry.size());
+  for (size_t g = 0; g < v29.geometry.size(); g++) {
+    const auto &a = v29.geometry[g].meshes;
+    const auto &b = bsp2.geometry[g].meshes;
+    REQUIRE(b.size() == a.size());
+    for (size_t m = 0; m < a.size(); m++) {
+      REQUIRE(b[m].textureName == a[m].textureName);
+      REQUIRE(b[m].indices == a[m].indices);
+      REQUIRE(b[m].vertices.size() == a[m].vertices.size());
+      for (size_t v = 0; v < a[m].vertices.size(); v++)
+        for (int k = 0; k < 3; k++)
+          REQUIRE(b[m].vertices[v].point[k] == a[m].vertices[v].point[k]);
+    }
+  }
+  REQUIRE(bsp2.lightmap.width == v29.lightmap.width);
+  REQUIRE(bsp2.lightmap.styles == v29.lightmap.styles);
+  REQUIRE(bsp2.lightmap.layers == v29.lightmap.layers);
+}

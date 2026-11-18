@@ -10,7 +10,7 @@ All functions throw `std::runtime_error` on failure.
 Level LoadBsp(const std::string &path, const BspLoadOptions &options = {});
 ```
 
-Reads a version 29 bsp and its `.lit` file if there is one.
+Reads a version 29 or BSP2 bsp and its `.lit` file if there is one.
 
 | `BspLoadOptions` | Default | |
 |---|---|---|

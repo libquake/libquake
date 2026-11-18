@@ -143,7 +143,7 @@ namespace quakelib {
     if (status == bsp::QBSP_ERR_CANNOT_OPEN)
       throw std::runtime_error("cannot open " + path);
     if (status != bsp::QBSP_OK)
-      throw std::runtime_error("cannot load " + path + ": not a quake 1 bsp (version 29)");
+      throw std::runtime_error("cannot load " + path + ": not a quake 1 bsp (version 29 or BSP2)");
 
     Level level;
     level.entities = detail::ParseEntityText(file.EntityLump());
