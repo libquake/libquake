@@ -1,7 +1,9 @@
 #include <quakelib/map/map.h>
+#include <quakelib/texture_name.h>
 
 #include <algorithm>
 #include <iostream>
+#include <set>
 
 namespace quakelib::map {
   void QMap::LoadBuffer(const char *buffer, getTextureBoundsCb getTextureBounds) {
@@ -37,8 +39,13 @@ namespace quakelib::map {
 
   void QMap::GenerateGeometry() {
     bool clipBrushes = m_config.csg;
+    std::set<int> liquidTextures;
+    for (int i = 0; i < (int)m_map_file->m_textures.size(); i++)
+      if (IsLiquidTexture(m_map_file->m_textures[i]))
+        liquidTextures.insert(i);
+
     for (const auto &se : m_map_file->m_solidEntities) {
-      se->generateMesh(m_textureIDTypes, m_textureIDBounds);
+      se->generateMesh(m_textureIDTypes, m_textureIDBounds, liquidTextures);
       if (clipBrushes) {
         se->csgUnion();
       }

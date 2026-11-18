@@ -5,8 +5,9 @@
 
 namespace quakelib::map {
   void Brush::buildGeometry(const std::map<int, MapSurface::eFaceType> &faceTypes,
-                            const std::map<int, textureBounds> &texBounds) {
-    generatePolygons(faceTypes, texBounds);
+                            const std::map<int, textureBounds> &texBounds,
+                            const std::set<int> &liquidTextures) {
+    generatePolygons(faceTypes, texBounds, liquidTextures);
     indexFaceVertices();
     calculateAABB();
   }
@@ -222,8 +223,11 @@ namespace quakelib::map {
   } // namespace
 
   void Brush::generatePolygons(const std::map<int, MapSurface::eFaceType> &faceTypes,
-                               const std::map<int, textureBounds> &texBounds) {
+                               const std::map<int, textureBounds> &texBounds,
+                               const std::set<int> &liquidTextures) {
     for (auto &face : m_faces) {
+      if (liquidTextures.contains(face->m_textureID))
+        m_isLiquid = true;
       auto kv = faceTypes.find(face->m_textureID);
       if (kv != faceTypes.end()) {
         face->m_type = kv->second;

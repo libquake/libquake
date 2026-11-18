@@ -157,7 +157,7 @@ typedef struct QLibBspOptions {
 typedef enum QLibTextureFlags {
   QLIB_TEXTURE_SKY = 1 << 0,      ///< name starts with "sky", two layers (albedo = back, sky front = clouds)
   QLIB_TEXTURE_ALPHA = 1 << 1,    ///< name starts with '{', palette index 255 is transparent: alpha test
-  QLIB_TEXTURE_LIQUID = 1 << 2,   ///< name starts with '*' (water, slime, lava, teleporter)
+  QLIB_TEXTURE_LIQUID = 1 << 2,   ///< name starts with '*' or '#' (water, slime, lava, teleporter)
   QLIB_TEXTURE_HAS_DATA = 1 << 3, ///< pixels available (not for MAP files or BSPs compiled with -notex)
   QLIB_TEXTURE_HAS_EMISSION = 1 << 4,  ///< fullbright pixels, QLIB_TEXTURE_LAYER_EMISSION
   QLIB_TEXTURE_HAS_SKY_FRONT = 1 << 5, ///< QLIB_TEXTURE_LAYER_SKY_FRONT

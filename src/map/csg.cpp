@@ -42,6 +42,11 @@ namespace quakelib::map {
           continue;
         }
 
+        // what lies under water stays visible through it, walls and other water still cut the water
+        if (b2.IsLiquidBrush() && !b1.IsLiquidBrush()) {
+          continue;
+        }
+
         if (!b1.DoesIntersect(b2) || (b1.IsBlockVolume() || b2.IsBlockVolume())) {
           continue;
         }

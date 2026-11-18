@@ -70,7 +70,7 @@ Values are never converted to OpenGL coordinates.
 
 | Member | |
 |---|---|
-| `Type type` | `Solid`, `Clip` (only clip faces) or `Liquid` (a `*` texture) |
+| `Type type` | `Solid`, `Clip` (only clip faces) or `Liquid` (a `*` or `#` texture) |
 | `std::string textureName` | liquids: the liquid texture as in the map (`*water1`, `*slime0`, `*lava1`), empty otherwise |
 | `std::vector<Vec3> points` | corners without duplicates |
 | `std::vector<uint32_t> indices` | triangles, same winding as the meshes |
@@ -91,7 +91,8 @@ Values are never converted to OpenGL coordinates.
 
 `uint32_t ClassifyTexture(const std::string &textureName)`
 :   `TextureFlags` from the name alone, case insensitive, a path is ignored: `TEXTURE_SKY` (`sky...`),
-    `TEXTURE_ALPHA` (`{...`), `TEXTURE_LIQUID` (`*...`). `IsSkyTexture`, `IsAlphaTexture` and
+    `TEXTURE_ALPHA` (`{...`), `TEXTURE_LIQUID` (`*...`, or `#...` for
+    names from files, where Windows does not allow `*`). `IsSkyTexture`, `IsAlphaTexture` and
     `IsLiquidTexture` test one flag. `#include <quakelib/texture_name.h>`, included by `level.h`.
 
 `SurfaceType DefaultSurfaceType(const std::string &textureName)`

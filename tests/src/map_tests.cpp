@@ -627,7 +627,8 @@ namespace {
 TEST_CASE("brush entity pivots", "[map/level]") {
   std::string text = "{\n\"classname\" \"worldspawn\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") + "}\n";
   text += "{\n\"classname\" \"func_wall\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") + "}\n";
-  text += "{\n\"classname\" \"func_wall\"\n\"_pivot\" \"center\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") + "}\n";
+  text += "{\n\"classname\" \"func_wall\"\n\"_pivot\" \"center\"\n" +
+          box({64, 0, 16}, {128, 32, 48}, "ground1") + "}\n";
   text += "{\n\"classname\" \"func_door\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") +
           box({0, 0, 0}, {16, 16, 16}, "origin") + "}\n";
   auto doc = ParseMapText(text);
@@ -684,11 +685,12 @@ TEST_CASE("trenchbroom groups as one geometry", "[map/level]") {
   std::string text = "{\n\"classname\" \"worldspawn\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") + "}\n";
   text += "{\n\"classname\" \"func_group\"\n\"_tb_type\" \"_tb_group\"\n\"_tb_id\" \"1\"\n" +
           box({0, 0, 0}, {32, 32, 32}, "ground1") + "}\n";
-  text += "{\n\"classname\" \"func_detail\"\n\"_tb_group\" \"1\"\n" + box({32, 0, 0}, {64, 32, 16}, "ground1") +
-          "}\n";
+  text += "{\n\"classname\" \"func_detail\"\n\"_tb_group\" \"1\"\n" +
+          box({32, 0, 0}, {64, 32, 16}, "ground1") + "}\n";
   // a nested group goes into the outermost one
-  text += "{\n\"classname\" \"func_group\"\n\"_tb_type\" \"_tb_group\"\n\"_tb_id\" \"2\"\n\"_tb_group\" \"1\"\n" +
-          box({0, 32, 0}, {32, 64, 64}, "ground1") + "}\n";
+  text +=
+      "{\n\"classname\" \"func_group\"\n\"_tb_type\" \"_tb_group\"\n\"_tb_id\" \"2\"\n\"_tb_group\" \"1\"\n" +
+      box({0, 32, 0}, {32, 64, 64}, "ground1") + "}\n";
   auto doc = ParseMapText(text);
 
   Level separate = BuildMap(doc);
@@ -709,4 +711,37 @@ TEST_CASE("trenchbroom groups as one geometry", "[map/level]") {
   REQUIRE(group.pivot[2] == 0);
   // the world stays apart
   REQUIRE(level.geometry[level.entities[0].geometry].hulls.size() == 1);
+}
+
+TEST_CASE("water does not hide what is under it", "[map/csg]") {
+  REQUIRE(IsLiquidTexture("*water1"));
+  REQUIRE(IsLiquidTexture("liquids/#water1"));
+
+  std::string text = "{\n\"classname\" \"worldspawn\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") +
+                     box({16, 16, -8}, {240, 240, 32}, "*water1") + "}\n";
+  Level level = BuildMap(ParseMapText(text));
+
+  // area of the triangles of a texture that face up (z 1) or down (z -1)
+  auto areaFacing = [&](const std::string &texture, float z) {
+    float area = 0;
+    for (const auto &m : level.geometry[0].meshes) {
+      if (m.textureName != texture)
+        continue;
+      for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
+        const auto &a = m.vertices[m.indices[i]];
+        const auto &b = m.vertices[m.indices[i + 1]];
+        const auto &c = m.vertices[m.indices[i + 2]];
+        if (std::abs(a.normal[2] - z) > 1e-4f)
+          continue;
+        float ux = b.point[0] - a.point[0], uy = b.point[1] - a.point[1];
+        float vx = c.point[0] - a.point[0], vy = c.point[1] - a.point[1];
+        area += std::abs(ux * vy - uy * vx) * 0.5f;
+      }
+    }
+    return area;
+  };
+  // the floor's whole top stays, also under the water; the water's bottom inside the floor goes
+  REQUIRE(std::abs(areaFacing("ground1", 1) - 256.0f * 256.0f) < 1.0f);
+  REQUIRE(areaFacing("*water1", 1) > 0);
+  REQUIRE(areaFacing("*water1", -1) == 0);
 }

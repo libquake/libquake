@@ -68,7 +68,7 @@ Header `src/wrapper.h`, `QLIB_API_VERSION` 3. Usage notes are in the [guide](../
 |---|---|
 | `QLIB_TEXTURE_SKY` | name starts with `sky` |
 | `QLIB_TEXTURE_ALPHA` | name starts with `{`, draw with alpha test |
-| `QLIB_TEXTURE_LIQUID` | name starts with `*` |
+| `QLIB_TEXTURE_LIQUID` | name starts with `*` or `#` |
 | `QLIB_TEXTURE_HAS_DATA` | albedo layer available |
 | `QLIB_TEXTURE_HAS_EMISSION` | emission layer available |
 | `QLIB_TEXTURE_HAS_SKY_FRONT` | sky front layer available |

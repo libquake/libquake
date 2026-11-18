@@ -37,7 +37,7 @@ namespace quakelib::map {
 
   private:
     void generateMesh(const std::map<int, MapSurface::eFaceType> &faceTypes,
-                      const std::map<int, textureBounds> &texBounds);
+                      const std::map<int, textureBounds> &texBounds, const std::set<int> &liquidTextures);
     void csgUnion();
     void weldVertices();
     void fixTJunctions();

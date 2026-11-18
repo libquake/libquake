@@ -12,7 +12,8 @@ namespace quakelib {
     const char *name = textureName.c_str() + start;
     if (name[0] == '{')
       return TEXTURE_ALPHA;
-    if (name[0] == '*')
+    // '#' stands for '*' in file names, where Windows does not allow it
+    if (name[0] == '*' || name[0] == '#')
       return TEXTURE_LIQUID;
     auto lowerAt = [&](size_t i) { return std::tolower((unsigned char)name[i]); };
     if (textureName.size() - start >= 3 && lowerAt(0) == 's' && lowerAt(1) == 'k' && lowerAt(2) == 'y')

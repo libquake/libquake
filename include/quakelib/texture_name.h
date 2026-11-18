@@ -6,9 +6,10 @@
 namespace quakelib {
   /// What the engine derives from a texture name alone.
   enum TextureFlags : uint32_t {
-    TEXTURE_SKY = 1 << 0,    ///< starts with "sky": two layers, drawn unlit
-    TEXTURE_ALPHA = 1 << 1,  ///< starts with '{': palette index 255 is transparent
-    TEXTURE_LIQUID = 1 << 2, ///< starts with '*': water, slime, lava, teleporters, drawn unlit
+    TEXTURE_SKY = 1 << 0,   ///< starts with "sky": two layers, drawn unlit
+    TEXTURE_ALPHA = 1 << 1, ///< starts with '{': palette index 255 is transparent
+    TEXTURE_LIQUID = 1
+        << 2, ///< starts with '*', or '#' in file names: water, slime, lava, teleporters, unlit
   };
 
   /// Classifies a texture by name, case insensitive. A path ("common/sky1") is ignored.

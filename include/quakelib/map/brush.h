@@ -3,6 +3,7 @@
 #include "face.h"
 #include "types.h"
 #include <memory>
+#include <set>
 #include <vector>
 
 #include <quakelib/vertex.h>
@@ -38,9 +39,11 @@ namespace quakelib::map {
      * This process involves intersection calculation, vertex generation, and winding.
      * @param faceTypes Map of texture IDs to face types.
      * @param texBounds Map of texture IDs to texture dimensions.
+     * @param liquidTextures IDs of liquid textures; a brush with one of them is a liquid brush.
      */
     void buildGeometry(const std::map<int, MapSurface::eFaceType> &faceTypes,
-                       const std::map<int, textureBounds> &texBounds);
+                       const std::map<int, textureBounds> &texBounds,
+                       const std::set<int> &liquidTextures = {});
 
     /**
      * @brief Expands a bounding box to include this brush.
@@ -62,6 +65,12 @@ namespace quakelib::map {
     bool IsNonSolidBrush() const { return m_isNonSolid; }
 
     /**
+     * @brief Checks if a face of the brush has a liquid texture (water, slime, lava, teleporter).
+     * @return True for liquid brushes; they do not hide solid faces in CSG but are clipped themselves.
+     */
+    bool IsLiquidBrush() const { return m_isLiquid; }
+
+    /**
      * @brief Gets the faces that make up this brush.
      * @return A vector of pointers to the faces.
      */
@@ -80,7 +89,7 @@ namespace quakelib::map {
     std::vector<FacePtr> m_faces;
 
     void generatePolygons(const std::map<int, MapSurface::eFaceType> &faceTypes,
-                          const std::map<int, textureBounds> &texBounds);
+                          const std::map<int, textureBounds> &texBounds, const std::set<int> &liquidTextures);
     std::vector<FacePtr> clipToBrush(const Brush &other, bool keepOnPlane);
     void indexFaceVertices();
     void calculateAABB();
@@ -90,6 +99,7 @@ namespace quakelib::map {
 
     bool m_isBlockVolume = false;
     bool m_isNonSolid = false;
+    bool m_isLiquid = false;
 
     friend class QMapFile;
     friend class SolidMapEntity;

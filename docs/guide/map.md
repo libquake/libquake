@@ -54,7 +54,7 @@ Every brush becomes one convex hull with its own points and triangles.
 |---|---|
 | `Solid` | everything else |
 | `Clip` | only `CLIP` faces (`clip`, `trigger` or your own `faceTypes`) |
-| `Liquid` | a texture starting with `*` |
+| `Liquid` | a texture starting with `*`, or `#` where the name comes from a file (Windows does not allow `*`) |
 
 Brushes made only of `hint`, `hintskip` and `origin` get no hull. A trigger brush is a `Clip` hull, use
 the entity's classname to decide what it does.
@@ -81,3 +81,7 @@ and keep no geometry of their own. The pivot is then the one of the whole group.
 
 CSG only removes faces between brushes of the same entity. `func_group` and `func_detail` are separate
 entities and are not merged with the world.
+
+Liquid brushes hide nothing: the floor and walls under the water keep their faces, so they stay visible
+through it. The liquid itself is still cut by solid brushes and other liquids, its faces inside a wall or
+the floor are removed.

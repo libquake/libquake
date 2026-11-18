@@ -4,13 +4,14 @@
 namespace quakelib::map {
 
   void SolidMapEntity::generateMesh(const std::map<int, MapSurface::eFaceType> &faceTypes,
-                                    const std::map<int, textureBounds> &texBounds) {
+                                    const std::map<int, textureBounds> &texBounds,
+                                    const std::set<int> &liquidTextures) {
     if (!m_brushes.empty()) {
       m_min = m_brushes[0].min;
       m_max = m_brushes[0].max;
     }
     for (auto &b : m_brushes) {
-      b.buildGeometry(faceTypes, texBounds);
+      b.buildGeometry(faceTypes, texBounds, liquidTextures);
       b.GetBiggerBBox(m_min, m_max);
     }
     m_center = math::CalculateCenterFromBBox(m_min, m_max);
