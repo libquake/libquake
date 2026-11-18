@@ -20,6 +20,7 @@ collision hulls, entities, RGBA textures and lightmaps split by light style, and
 - `.bsp`: version 29 and BSP2 with `.lit` files, embedded textures, light styles
 - `.wad`: WAD2 textures with fullbright emission maps and split sky layers
 - C API for bindings, used by the [LibQuake Unity plugin](https://libquake.github.io/unity/)
+- engine plugins built on it: [Godot](https://libquake.github.io/godot/), [Unity](https://libquake.github.io/unity/) and [Unreal](https://libquake.github.io/unreal/)
 
 ```cpp
 #include <quakelib/bsp/bsp_level.h>
