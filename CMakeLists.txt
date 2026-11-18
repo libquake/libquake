@@ -11,7 +11,10 @@ project(
 
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "" FORCE)
+# universal binaries for releases, but only as the main project: a parent project picks its own architectures
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "" FORCE)
+endif()
 option(QLIB_BUILD_VIEWER "Build qviewer tool" ON)
 option(QLIB_BUILD_TESTS "Build tests" ON)
 option(QLIB_BUILD_EXAMPLES "Build the examples used by the documentation" OFF)

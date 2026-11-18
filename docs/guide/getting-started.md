@@ -15,6 +15,9 @@ target_link_libraries(my_engine PRIVATE quakelib)
 
 `quakelib` is a shared library. Headers are under `include/quakelib/`.
 
+Built on its own, libquake makes universal binaries on macOS (`arm64;x86_64`). As a subdirectory it
+leaves `CMAKE_OSX_ARCHITECTURES` to the parent project.
+
 | Option | Default | |
 |---|---|---|
 | `QLIB_BUILD_VIEWER` | `ON` | qviewer, uses an installed raylib or fetches it |
