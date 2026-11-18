@@ -44,6 +44,24 @@ std::vector<BakeLight> QuakeLightsFromEntities(const std::vector<LevelEntity> &e
 `BuildMap` calls both. Use them directly to bake a layout with your own lights and occluders.
 `QuakeLightsFromEntities` writes the worldspawn settings to `optionsOut`.
 
+```cpp
+BakedLightmap BakeLightmap(const BakeSurfaces &surfaces, const BakeOccluders &occluders,
+                           const std::vector<BakeLight> &lights, const BakeOptions &options = {});
+```
+
+Bakes triangles of any shape, e.g. models next to brushes, placed in the atlas by their own uvs (an unwrap,
+or the uvs of an earlier layout). Every texel is found by rasterizing the triangles; texels at an edge sample
+the closest point on the triangle. On smooth triangles (normals that differ from the face normal) the angle
+independent share of the light fades out towards the shadow line instead of dropping at 90°.
+
+| `BakeSurfaces` | Default | |
+|---|---|---|
+| `int width`, `height` | | atlas size |
+| `std::vector<Vec3> positions` | | 3 per triangle |
+| `std::vector<Vec3> normals` | | 3 per triangle, interpolated across it |
+| `std::vector<Vec2> uvs` | | 3 per triangle, in texels: texel (i, j) covers [i, i + 1) × [j, j + 1) |
+| `int padding` | 1 | texels filled around the triangles |
+
 | `BakeLight` | Default | |
 |---|---|---|
 | `Type type` | `Point` | `Point`, `Spot` or `Sun` |
@@ -64,6 +82,7 @@ std::vector<BakeLight> QuakeLightsFromEntities(const std::vector<LevelEntity> &e
 | `float rangeScale` | 0.5 | `_range` |
 | `float minLight` | 0 | `light` / `_minlight` on the worldspawn |
 | `Vec3 minLightColor` | `{1, 1, 1}` | |
+| `Vec3 ambient` | `{0, 0, 0}` | added to the static light before `minLight`, in lightmap units (128 is normal) |
 | `float surfaceOffset` | 1 | distance of the samples from the surface |
 | `int threads` | 0 | 0 uses all hardware threads |
 

@@ -611,15 +611,59 @@ TEST_CASE("spot lights read their cone angle", "[map/lightmap]") {
   REQUIRE(lights[0].direction[2] < -0.99f);
 }
 
+TEST_CASE("surface baker", "[map/lightmap]") {
+  // a 256 x 256 floor in the texels 4..20 of a 24 x 24 atlas, 16 units per texel
+  auto floor = [](Vec3 normal) {
+    BakeSurfaces s;
+    s.width = s.height = 24;
+    s.padding = 1;
+    const Vec3 corners[4] = {{0, 0, 0}, {256, 0, 0}, {256, 256, 0}, {0, 256, 0}};
+    for (int k : {0, 1, 2, 0, 2, 3}) {
+      s.positions.push_back(corners[k]);
+      s.normals.push_back(normal);
+      s.uvs.push_back(Vec2{corners[k][0] / 16 + 4, corners[k][1] / 16 + 4});
+    }
+    return s;
+  };
+  auto texel = [](const BakedLightmap &b, int x, int y, int channel = 0) {
+    return (int)b.layers[0][((size_t)y * b.width + x) * 4 + channel];
+  };
+  BakeLight light;
+  light.position = {136, 136, 128};
+
+  auto baked = BakeLightmap(floor({0, 0, 1}), {}, {light});
+  // texel (8, 8) of the floor samples (136, 136, 0), one unit above it: (300 - 127) * range scale 0.5
+  REQUIRE(std::abs(texel(baked, 12, 12) - 87) <= 1);
+  // texel 3 overlaps the floor's edge, texel 2 is padding and takes its light, texel 1 stays empty
+  REQUIRE(texel(baked, 3, 12, 3) == 255);
+  REQUIRE(texel(baked, 2, 12) == texel(baked, 3, 12));
+  REQUIRE(texel(baked, 1, 12, 3) == 0);
+
+  BakeOccluders roof;
+  roof.triangles = {{100, 100, 64}, {200, 100, 64}, {200, 200, 64}, {100, 100, 64}, {200, 200, 64}, {100, 200, 64}};
+  REQUIRE(texel(BakeLightmap(floor({0, 0, 1}), roof, {light}), 12, 12) == 0);
+
+  // a light barely above the floor: a flat floor keeps the angle independent half, a smooth one fades it out
+  BakeLight grazing;
+  grazing.position = {-64, 136, 8};
+  int flat = texel(BakeLightmap(floor({0, 0, 1}), {}, {grazing}), 5, 12);
+  int smooth = texel(BakeLightmap(floor(math::Norm(Vec3{0.05f, 0, 1})), {}, {grazing}), 5, 12);
+  REQUIRE(flat > 50);
+  REQUIRE(smooth < flat / 2);
+}
+
 namespace {
   std::string box(Vec3 a, Vec3 b, const std::string &tex) {
     auto p = [](float x, float y, float z) {
-      return "( " + std::to_string((int)x) + " " + std::to_string((int)y) + " " + std::to_string((int)z) + " ) ";
+      return "( " + std::to_string((int)x) + " " + std::to_string((int)y) + " " + std::to_string((int)z) +
+             " ) ";
     };
     auto face = [&](const std::string &points) { return points + tex + " 0 0 0 1 1\n"; };
     return "{\n" + face(p(a[0], 0, 0) + p(a[0], 1, 0) + p(a[0], 0, 1)) +
-           face(p(b[0], 0, 0) + p(b[0], 0, 1) + p(b[0], 1, 0)) + face(p(0, a[1], 0) + p(0, a[1], 1) + p(1, a[1], 0)) +
-           face(p(0, b[1], 0) + p(1, b[1], 0) + p(0, b[1], 1)) + face(p(0, 0, a[2]) + p(1, 0, a[2]) + p(0, 1, a[2])) +
+           face(p(b[0], 0, 0) + p(b[0], 0, 1) + p(b[0], 1, 0)) +
+           face(p(0, a[1], 0) + p(0, a[1], 1) + p(1, a[1], 0)) +
+           face(p(0, b[1], 0) + p(1, b[1], 0) + p(0, b[1], 1)) +
+           face(p(0, 0, a[2]) + p(1, 0, a[2]) + p(0, 1, a[2])) +
            face(p(0, 0, b[2]) + p(0, 1, b[2]) + p(1, 0, b[2])) + "}\n";
   }
 } // namespace

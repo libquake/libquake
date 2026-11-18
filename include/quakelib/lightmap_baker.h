@@ -49,6 +49,8 @@ namespace quakelib {
     /// lower bound for style 0, in lightmap units (worldspawn "light" / "_minlight")
     float minLight = 0.0f;
     Vec3 minLightColor{1, 1, 1};
+    /// added to the static light of every sample before minLight, in lightmap units (128 is normal)
+    Vec3 ambient{0, 0, 0};
     /// distance of the sample points from their surface, keeps them out of the surface itself
     float surfaceOffset = 1.0f;
     /// 0 uses all hardware threads
@@ -72,6 +74,26 @@ namespace quakelib {
    * @brief Direct lighting with shadows for every chart of the layout.
    */
   BakedLightmap BakeLightmap(const LightmapLayout &layout, const BakeOccluders &occluders,
+                             const std::vector<BakeLight> &lights, const BakeOptions &options = {});
+
+  /**
+   * @brief Triangles of any shape, placed in a lightmap atlas by their own uvs (an unwrap, or the uvs of an
+   * earlier layout). The baker finds the surface point of every texel by rasterizing the triangles.
+   */
+  struct BakeSurfaces {
+    int width = 0;
+    int height = 0;
+    std::vector<Vec3> positions; ///< 3 per triangle
+    std::vector<Vec3> normals;   ///< 3 per triangle, interpolated across it
+    std::vector<Vec2> uvs;       ///< 3 per triangle, in texels: texel (i, j) covers [i, i + 1) x [j, j + 1)
+    /// texels filled around the triangles, keeps filtering from pulling in black
+    int padding = 1;
+  };
+
+  /**
+   * @brief Direct lighting with shadows for surfaces of any shape, e.g. models next to brushes.
+   */
+  BakedLightmap BakeLightmap(const BakeSurfaces &surfaces, const BakeOccluders &occluders,
                              const std::vector<BakeLight> &lights, const BakeOptions &options = {});
 
   /**

@@ -214,6 +214,83 @@ namespace quakelib {
       }
     }
 
+    // smooth surfaces: cosine below which the angle independent share fades out
+    constexpr float SMOOTH_TERMINATOR = 0.2f;
+
+    /// Light of one light at a sample point, false if it does not reach it. Quake's angle term jumps from
+    /// (1 - angleScale) to 0 where a light passes the surface plane; smooth surfaces fade it out instead,
+    /// a hard line across a curved surface would show.
+    bool lightAt(const BakeLight &l, const Vec3 &pos, const Vec3 &normal, bool smooth, const Bvh &bvh,
+                 const BakeOccluders &occ, const BakeOptions &opt, Vec3 &out) {
+      float value, cosAngle;
+      Vec3 toLight;
+      float maxT;
+      if (l.type == BakeLight::Type::Sun) {
+        toLight = l.direction * -1.0f;
+        cosAngle = math::Dot(normal, toLight);
+        if (cosAngle <= 0)
+          return false;
+        value = l.intensity;
+        maxT = 1e7f;
+      } else {
+        Vec3 d = l.position - pos;
+        float dist = math::Len(d);
+        if (dist < 1e-3f)
+          return false;
+        toLight = d / dist;
+        value = lightValue(l, dist);
+        if (value == 0)
+          return false;
+        if (l.type == BakeLight::Type::Spot) {
+          float c = math::Dot(toLight * -1.0f, l.direction);
+          float outer = std::cos(l.coneAngle * 0.5f * (float)HMM_PI / 180.0f);
+          if (c < outer)
+            return false;
+          if (l.softAngle > 0 && l.softAngle < l.coneAngle) {
+            float inner = std::cos(l.softAngle * 0.5f * (float)HMM_PI / 180.0f);
+            if (c < inner)
+              value *= (c - outer) / (inner - outer);
+          }
+        }
+        cosAngle = std::max(0.0f, math::Dot(normal, toLight));
+        maxT = dist - 0.5f;
+      }
+      float flat = 1.0f - opt.angleScale;
+      if (smooth)
+        flat *= std::min(cosAngle / SMOOTH_TERMINATOR, 1.0f);
+      value *= flat + opt.angleScale * cosAngle;
+
+      if (l.castShadows) {
+        Ray ray = makeRay(pos, toLight);
+        if (l.type == BakeLight::Type::Sun) {
+          float t;
+          int hit = bvh.closest(ray, 0.01f, maxT, t);
+          if (hit >= 0 && (occ.isSky.empty() || !occ.isSky[hit]))
+            return false;
+        } else if (bvh.any(ray, 0.01f, maxT)) {
+          return false;
+        }
+      }
+      out = l.color * value;
+      return true;
+    }
+
+    void applyRangeScale(std::vector<Vec3> &layer, const BakeOptions &opt) {
+      for (auto &v : layer)
+        v = v * opt.rangeScale;
+    }
+
+    void applyAmbientAndMinLight(std::vector<Vec3> &staticLayer, const BakeOptions &opt) {
+      for (auto &v : staticLayer)
+        v += opt.ambient;
+      if (opt.minLight <= 0)
+        return;
+      Vec3 ml = opt.minLightColor * opt.minLight;
+      for (auto &v : staticLayer)
+        for (int a = 0; a < 3; a++)
+          v[a] = std::max(v[a], ml[a]);
+    }
+
     // ---------------------------------------------------------------------------------------------------
     // chart sampling
 
@@ -334,72 +411,163 @@ namespace quakelib {
           size_t o = (size_t)j * w + i;
 
           for (int li : active) {
-            const auto &l = lights[li];
-            float value, cosAngle;
-            Vec3 toLight;
-            float maxT;
-            if (l.type == BakeLight::Type::Sun) {
-              toLight = l.direction * -1.0f;
-              cosAngle = math::Dot(chart.normal, toLight);
-              if (cosAngle <= 0)
-                continue;
-              value = l.intensity;
-              maxT = 1e7f;
-            } else {
-              Vec3 d = l.position - pos;
-              float dist = math::Len(d);
-              if (dist < 1e-3f)
-                continue;
-              toLight = d / dist;
-              value = lightValue(l, dist);
-              if (value == 0)
-                continue;
-              if (l.type == BakeLight::Type::Spot) {
-                float c = math::Dot(toLight * -1.0f, l.direction);
-                float outer = std::cos(l.coneAngle * 0.5f * (float)HMM_PI / 180.0f);
-                if (c < outer)
-                  continue;
-                if (l.softAngle > 0 && l.softAngle < l.coneAngle) {
-                  float inner = std::cos(l.softAngle * 0.5f * (float)HMM_PI / 180.0f);
-                  if (c < inner)
-                    value *= (c - outer) / (inner - outer);
-                }
-              }
-              cosAngle = std::max(0.0f, math::Dot(chart.normal, toLight));
-              maxT = dist - 0.5f;
-            }
-            value *= (1.0f - opt.angleScale) + opt.angleScale * cosAngle;
-
-            if (l.castShadows) {
-              Ray ray = makeRay(pos, toLight);
-              if (l.type == BakeLight::Type::Sun) {
-                float t;
-                int hit = bvh.closest(ray, 0.01f, maxT, t);
-                if (hit >= 0 && (occ.isSky.empty() || !occ.isSky[hit]))
-                  continue;
-              } else if (bvh.any(ray, 0.01f, maxT)) {
-                continue;
-              }
-            }
-            styleSlot(l.style)[o] += l.color * value;
+            Vec3 value;
+            if (lightAt(lights[li], pos, chart.normal, false, bvh, occ, opt, value))
+              styleSlot(lights[li].style)[o] += value;
           }
         }
       }
 
       for (auto &layer : res.values)
-        for (auto &v : layer)
-          v = v * opt.rangeScale;
-
-      if (opt.minLight > 0) {
-        Vec3 ml = opt.minLightColor * opt.minLight;
-        for (auto &v : styleSlot(0))
-          for (int a = 0; a < 3; a++)
-            v[a] = std::max(v[a], ml[a]);
-      }
+        applyRangeScale(layer, opt);
+      applyAmbientAndMinLight(styleSlot(0), opt);
       return res;
     }
 
     uint8_t toByte(float v) { return (uint8_t)std::clamp((int)std::lround(v), 0, 255); }
+
+    // fill texels next to covered ones from their neighbours, so filtering and mip maps do not pull in black
+    void fillPadding(BakedLightmap &out, std::vector<uint8_t> covered, int passes) {
+      for (int pass = 0; pass < std::max(1, passes); pass++) {
+        std::vector<uint8_t> next = covered;
+        for (int y = 0; y < out.height; y++)
+          for (int x = 0; x < out.width; x++) {
+            size_t o = (size_t)y * out.width + x;
+            if (covered[o])
+              continue;
+            const int nb[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+            for (auto &layer : out.layers) {
+              int sum[3] = {0}, n = 0;
+              for (auto &d : nb) {
+                int nx = x + d[0], ny = y + d[1];
+                if (nx < 0 || ny < 0 || nx >= out.width || ny >= out.height)
+                  continue;
+                size_t no = (size_t)ny * out.width + nx;
+                if (!covered[no])
+                  continue;
+                for (int k = 0; k < 3; k++)
+                  sum[k] += layer[no * 4 + k];
+                n++;
+              }
+              if (n > 0) {
+                for (int k = 0; k < 3; k++)
+                  layer[o * 4 + k] = (uint8_t)(sum[k] / n);
+                layer[o * 4 + 3] = 255;
+                next[o] = 1;
+              }
+            }
+          }
+        covered.swap(next);
+      }
+    }
+
+    template <typename Work> void parallelFor(size_t count, int threads, Work work) {
+      std::atomic<size_t> next{0};
+      int n = threads > 0 ? threads : (int)std::max(1u, std::thread::hardware_concurrency());
+      auto worker = [&]() {
+        for (size_t i; (i = next.fetch_add(1)) < count;)
+          work(i);
+      };
+      std::vector<std::thread> pool;
+      for (int t = 1; t < n; t++)
+        pool.emplace_back(worker);
+      worker();
+      for (auto &t : pool)
+        t.join();
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // surface sampling: triangles of any shape, found per texel by rasterizing them in uv space
+
+    struct TexelSample {
+      Vec3 surface; // point on the triangle
+      Vec3 normal;
+      float distance = 1e30f; // texels from the texel center to the triangle, 0 inside
+      bool smooth = false;    // the normals vary across the triangle
+      uint32_t triangle = 0;
+    };
+
+    // texels whose center is at most this far from a triangle overlap it
+    constexpr float COVER_DISTANCE = 0.71f;
+    // texels outside their triangle sample a point moved this share towards its center
+    constexpr float PULL_INSIDE = 0.02f;
+
+    Vec3 barycentric(const Vec2 &p, const Vec2 &a, const Vec2 &b, const Vec2 &c) {
+      Vec2 v0 = b - a, v1 = c - a, v2 = p - a;
+      float d = v0[0] * v1[1] - v1[0] * v0[1];
+      float v = (v2[0] * v1[1] - v1[0] * v2[1]) / d;
+      float w = (v0[0] * v2[1] - v2[0] * v0[1]) / d;
+      return Vec3{1.0f - v - w, v, w};
+    }
+
+    /// Per triangle the lights whose range reaches its bounding sphere, so a texel does not test every light.
+    std::vector<std::vector<uint32_t>> lightsPerTriangle(const BakeSurfaces &s,
+                                                         const std::vector<BakeLight> &lights,
+                                                         const std::vector<float> &ranges, int threads) {
+      std::vector<std::vector<uint32_t>> result(s.positions.size() / 3);
+      parallelFor(result.size(), threads, [&](size_t t) {
+        const Vec3 &a = s.positions[t * 3], &b = s.positions[t * 3 + 1], &c = s.positions[t * 3 + 2];
+        Vec3 center = (a + b + c) / 3.0f;
+        float radius = std::max({math::Len(a - center), math::Len(b - center), math::Len(c - center)});
+        for (uint32_t li = 0; li < lights.size(); li++)
+          if (lights[li].type == BakeLight::Type::Sun ||
+              math::Len(lights[li].position - center) <= ranges[li] + radius)
+            result[t].push_back(li);
+      });
+      return result;
+    }
+
+    std::vector<TexelSample> rasterize(const BakeSurfaces &s) {
+      std::vector<TexelSample> samples((size_t)s.width * s.height);
+      for (size_t t = 0; t + 2 < s.uvs.size(); t += 3) {
+        const Vec2 &a = s.uvs[t], &b = s.uvs[t + 1], &c = s.uvs[t + 2];
+        if (std::abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) < 1e-9f)
+          continue;
+        Vec3 face =
+            math::Norm(math::Cross(s.positions[t + 1] - s.positions[t], s.positions[t + 2] - s.positions[t]));
+        bool smooth = false;
+        for (int k = 0; k < 3; k++)
+          smooth |= std::abs(math::Dot(s.normals[t + k], face)) < 0.999f;
+        int x0 = std::max(0, (int)std::floor(std::min({a[0], b[0], c[0]}) - 1));
+        int y0 = std::max(0, (int)std::floor(std::min({a[1], b[1], c[1]}) - 1));
+        int x1 = std::min(s.width - 1, (int)std::ceil(std::max({a[0], b[0], c[0]}) + 1));
+        int y1 = std::min(s.height - 1, (int)std::ceil(std::max({a[1], b[1], c[1]}) + 1));
+        for (int y = y0; y <= y1; y++)
+          for (int x = x0; x <= x1; x++) {
+            Vec2 p{x + 0.5f, y + 0.5f};
+            Vec3 w = barycentric(p, a, b, c);
+            float distance = 0;
+            if (w[0] < 0 || w[1] < 0 || w[2] < 0) {
+              Vec2 closest = p;
+              distance = 1e30f;
+              const Vec2 *edges[3][2] = {{&a, &b}, {&b, &c}, {&c, &a}};
+              for (auto &edge : edges) {
+                Vec2 q = closestOnSegment(p, *edge[0], *edge[1]);
+                float dq = math::Len(q - p);
+                if (dq < distance) {
+                  distance = dq;
+                  closest = q;
+                }
+              }
+              if (distance > COVER_DISTANCE)
+                continue;
+              w = barycentric(closest, a, b, c);
+              for (int k = 0; k < 3; k++)
+                w[k] += (1.0f / 3.0f - w[k]) * PULL_INSIDE;
+            }
+            auto &sample = samples[(size_t)y * s.width + x];
+            if (distance >= sample.distance)
+              continue;
+            sample.distance = distance;
+            sample.surface = s.positions[t] * w[0] + s.positions[t + 1] * w[1] + s.positions[t + 2] * w[2];
+            Vec3 n = s.normals[t] * w[0] + s.normals[t + 1] * w[1] + s.normals[t + 2] * w[2];
+            sample.normal = math::Len(n) > 1e-6f ? math::Norm(n) : face;
+            sample.smooth = smooth;
+            sample.triangle = (uint32_t)(t / 3);
+          }
+      }
+      return samples;
+    }
 
     std::vector<float> floats(const std::string &s) {
       std::vector<float> out;
@@ -448,19 +616,9 @@ namespace quakelib {
     Bvh bvh(occluders.triangles);
 
     std::vector<ChartResult> results(layout.charts.size());
-    std::atomic<size_t> next{0};
-    int threads =
-        options.threads > 0 ? options.threads : (int)std::max(1u, std::thread::hardware_concurrency());
-    auto worker = [&]() {
-      for (size_t c; (c = next.fetch_add(1)) < layout.charts.size();)
-        results[c] = bakeChart(layout.charts[c], layout.luxelSize, bvh, occluders, ls, ranges, options);
-    };
-    std::vector<std::thread> pool;
-    for (int t = 1; t < threads; t++)
-      pool.emplace_back(worker);
-    worker();
-    for (auto &t : pool)
-      t.join();
+    parallelFor(layout.charts.size(), options.threads, [&](size_t c) {
+      results[c] = bakeChart(layout.charts[c], layout.luxelSize, bvh, occluders, ls, ranges, options);
+    });
 
     // layers in style order, 0 first
     out.styles.push_back(0);
@@ -505,38 +663,81 @@ namespace quakelib {
       out.layers[0][o * 4 + 3] = 255;
     }
 
-    // fill the padding from the charts next to it, so filtering and mip maps do not pull in black
-    for (int pass = 0; pass < std::max(1, layout.padding); pass++) {
-      std::vector<uint8_t> next = covered;
-      for (int y = 0; y < out.height; y++)
-        for (int x = 0; x < out.width; x++) {
-          size_t o = (size_t)y * out.width + x;
-          if (covered[o])
-            continue;
-          const int nb[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-          for (auto &layer : out.layers) {
-            int sum[3] = {0}, n = 0;
-            for (auto &d : nb) {
-              int nx = x + d[0], ny = y + d[1];
-              if (nx < 0 || ny < 0 || nx >= out.width || ny >= out.height)
-                continue;
-              size_t no = (size_t)ny * out.width + nx;
-              if (!covered[no])
-                continue;
-              for (int k = 0; k < 3; k++)
-                sum[k] += layer[no * 4 + k];
-              n++;
-            }
-            if (n > 0) {
-              for (int k = 0; k < 3; k++)
-                layer[o * 4 + k] = (uint8_t)(sum[k] / n);
-              layer[o * 4 + 3] = 255;
-              next[o] = 1;
-            }
-          }
-        }
-      covered.swap(next);
+    fillPadding(out, std::move(covered), layout.padding);
+
+    out.bakeMilliseconds =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    return out;
+  }
+
+  BakedLightmap BakeLightmap(const BakeSurfaces &surfaces, const BakeOccluders &occluders,
+                             const std::vector<BakeLight> &lights, const BakeOptions &options) {
+    auto start = std::chrono::steady_clock::now();
+    BakedLightmap out;
+    out.width = surfaces.width;
+    out.height = surfaces.height;
+
+    std::vector<BakeLight> ls = lights;
+    std::vector<float> ranges;
+    out.styles.push_back(0);
+    for (auto &l : ls) {
+      if (l.type != BakeLight::Type::Point)
+        l.direction = math::Norm(l.direction);
+      ranges.push_back(lightRange(l));
+      if (std::find(out.styles.begin(), out.styles.end(), l.style) == out.styles.end())
+        out.styles.push_back(l.style);
     }
+    std::sort(out.styles.begin(), out.styles.end());
+    std::vector<size_t> layerOf(ls.size());
+    for (size_t li = 0; li < ls.size(); li++)
+      layerOf[li] = std::find(out.styles.begin(), out.styles.end(), ls[li].style) - out.styles.begin();
+
+    const size_t texels = (size_t)out.width * out.height;
+    auto samples = rasterize(surfaces);
+    std::vector<std::vector<Vec3>> values(out.styles.size(), std::vector<Vec3>(texels, Vec3{0, 0, 0}));
+    Bvh bvh(occluders.triangles);
+    auto candidates = lightsPerTriangle(surfaces, ls, ranges, options.threads);
+
+    parallelFor((size_t)out.height, options.threads, [&](size_t y) {
+      for (int x = 0; x < out.width; x++) {
+        size_t o = y * out.width + x;
+        const auto &sample = samples[o];
+        if (sample.distance > COVER_DISTANCE)
+          continue;
+        Vec3 pos = sample.surface + sample.normal * options.surfaceOffset;
+        for (uint32_t li : candidates[sample.triangle]) {
+          const auto &l = ls[li];
+          if (l.type != BakeLight::Type::Sun) {
+            Vec3 toLight = l.position - sample.surface;
+            if (math::Dot(sample.normal, toLight) <= 0 || math::Len(toLight) > ranges[li])
+              continue;
+          }
+          Vec3 value;
+          if (lightAt(l, pos, sample.normal, sample.smooth, bvh, occluders, options, value))
+            values[layerOf[li]][o] += value;
+        }
+      }
+    });
+
+    std::vector<uint8_t> covered(texels, 0);
+    for (size_t o = 0; o < texels; o++)
+      covered[o] = samples[o].distance <= COVER_DISTANCE;
+    for (auto &layer : values)
+      applyRangeScale(layer, options);
+    applyAmbientAndMinLight(values[0], options);
+
+    out.layers.assign(out.styles.size(), std::vector<uint8_t>(texels * 4, 0));
+    for (size_t s = 0; s < values.size(); s++)
+      for (size_t o = 0; o < texels; o++) {
+        if (!covered[o])
+          continue;
+        auto &px = out.layers[s];
+        for (int k = 0; k < 3; k++)
+          px[o * 4 + k] = toByte(values[s][o][k]);
+        px[o * 4 + 3] = 255;
+      }
+
+    fillPadding(out, std::move(covered), surfaces.padding);
 
     out.bakeMilliseconds =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
