@@ -46,6 +46,10 @@ On Windows with Visual Studio, build with `cmake --build build --config Release`
 `QLIB_BUILD_VIEWER`, `QLIB_BUILD_TESTS` (both on) and `QLIB_BUILD_EXAMPLES` (off) select what is built
 besides the library.
 
+The light baker traces its rays with [Embree](https://www.embree.org/) where `third_party/embree` holds a
+prebuilt for the platform (macOS for now), elsewhere with a bvh of its own. `QLIB_EMBREE=OFF` always uses
+the own one. Binaries built with Embree ship its license, `third_party/embree/LICENSE.txt`.
+
 ## qviewer
 
 A viewer for maps and bsp files in `tools/qviewer`.

@@ -76,7 +76,8 @@ first:
 ```
 
 Baking uses all hardware threads unless `BakeOptions::threads` says otherwise. Use a release build, a debug
-build is many times slower.
+build is many times slower. Shadow rays are traced with Embree where libquake is built with it (see
+[Getting started](getting-started.md)), 3 to 7 times faster than without.
 
 ## Lightmap uvs
 

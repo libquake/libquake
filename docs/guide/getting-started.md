@@ -23,6 +23,11 @@ leaves `CMAKE_OSX_ARCHITECTURES` to the parent project.
 | `QLIB_BUILD_VIEWER` | `ON` | qviewer, uses an installed raylib or fetches it |
 | `QLIB_BUILD_TESTS` | `ON` | unit tests |
 | `QLIB_BUILD_EXAMPLES` | `OFF` | the programs in `examples/`, the longer snippets in this guide come from there |
+| `QLIB_EMBREE` | `ON` | the baker traces with Embree where `third_party/embree` has a prebuilt for the platform |
+
+Embree is linked statically. Binaries built with it have to ship its license (Apache 2.0,
+`third_party/embree/LICENSE.txt`). Without a prebuilt for the platform, or with `QLIB_EMBREE` off, the
+baker uses a bvh of its own: same results, several times slower on big maps.
 
 ## The Level
 

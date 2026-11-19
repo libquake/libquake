@@ -9,6 +9,8 @@ For historical releases, see [HISTORY.md](HISTORY.md).
 
 ### Added
 
+- **Embree** for the baker's rays, linked statically from `third_party/embree` (macOS so far), 3 to 7 times
+  faster bakes; `QLIB_EMBREE=OFF` or a platform without a prebuilt keeps the own bvh
 - **qviewer**: `--camera "x y z yaw pitch"` sets the start position, C prints the current one
 
 ---

@@ -1,5 +1,7 @@
 #include <quakelib/lightmap_baker.h>
 
+#include "bake_bvh.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -10,167 +12,9 @@
 
 namespace quakelib {
   namespace {
-    // ---------------------------------------------------------------------------------------------------
-    // bvh over the occluder triangles
-
-    struct Ray {
-      Vec3 o, d, inv;
-    };
-
-    Ray makeRay(const Vec3 &o, const Vec3 &d) {
-      auto inv = [](float v) { return std::abs(v) > 1e-12f ? 1.0f / v : (v < 0 ? -1e30f : 1e30f); };
-      return {o, d, Vec3{inv(d[0]), inv(d[1]), inv(d[2])}};
-    }
-
-    class Bvh {
-    public:
-      Bvh(const std::vector<Vec3> &tris) : m_tris(tris) {
-        size_t n = tris.size() / 3;
-        m_order.resize(n);
-        m_centers.resize(n);
-        for (size_t i = 0; i < n; i++) {
-          m_order[i] = (int)i;
-          m_centers[i] = (tris[i * 3] + tris[i * 3 + 1] + tris[i * 3 + 2]) / 3.0f;
-        }
-        if (n > 0) {
-          m_nodes.reserve(n * 2);
-          build(0, (int)n);
-        }
-      }
-
-      // first hit with t in (tmin, tmax), returns the triangle or -1
-      int closest(const Ray &r, float tmin, float tmax, float &tHit) const {
-        return traverse(r, tmin, tmax, false, tHit);
-      }
-
-      bool any(const Ray &r, float tmin, float tmax) const {
-        float t;
-        return traverse(r, tmin, tmax, true, t) >= 0;
-      }
-
-    private:
-      struct Node {
-        Vec3 mn, mx;
-        int first; // leaf: first triangle in m_order, inner: right child (left child is this + 1)
-        int count; // 0 for inner nodes
-      };
-
-      int build(int begin, int end) {
-        int idx = (int)m_nodes.size();
-        m_nodes.push_back({});
-        Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
-        Vec3 cmn = mn, cmx = mx;
-        for (int i = begin; i < end; i++) {
-          int t = m_order[i];
-          for (int k = 0; k < 3; k++) {
-            const auto &p = m_tris[t * 3 + k];
-            for (int a = 0; a < 3; a++) {
-              mn[a] = std::min(mn[a], p[a]);
-              mx[a] = std::max(mx[a], p[a]);
-            }
-          }
-          for (int a = 0; a < 3; a++) {
-            cmn[a] = std::min(cmn[a], m_centers[t][a]);
-            cmx[a] = std::max(cmx[a], m_centers[t][a]);
-          }
-        }
-        m_nodes[idx].mn = mn;
-        m_nodes[idx].mx = mx;
-
-        if (end - begin <= 4) {
-          m_nodes[idx].first = begin;
-          m_nodes[idx].count = end - begin;
-          return idx;
-        }
-        int axis = 0;
-        Vec3 ext = cmx - cmn;
-        if (ext[1] > ext[axis])
-          axis = 1;
-        if (ext[2] > ext[axis])
-          axis = 2;
-        int mid = (begin + end) / 2;
-        std::nth_element(m_order.begin() + begin, m_order.begin() + mid, m_order.begin() + end,
-                         [&](int a, int b) { return m_centers[a][axis] < m_centers[b][axis]; });
-        build(begin, mid);
-        int right = build(mid, end);
-        m_nodes[idx].first = right;
-        m_nodes[idx].count = 0;
-        return idx;
-      }
-
-      static bool hitBox(const Ray &r, const Vec3 &mn, const Vec3 &mx, float tmin, float tmax) {
-        for (int a = 0; a < 3; a++) {
-          float t0 = (mn[a] - r.o[a]) * r.inv[a];
-          float t1 = (mx[a] - r.o[a]) * r.inv[a];
-          if (t0 > t1)
-            std::swap(t0, t1);
-          tmin = std::max(tmin, t0);
-          tmax = std::min(tmax, t1);
-          if (tmin > tmax)
-            return false;
-        }
-        return true;
-      }
-
-      bool hitTriangle(const Ray &r, int t, float tmin, float tmax, float &out) const {
-        const Vec3 &a = m_tris[t * 3], &b = m_tris[t * 3 + 1], &c = m_tris[t * 3 + 2];
-        Vec3 e1 = b - a, e2 = c - a;
-        Vec3 p = math::Cross(r.d, e2);
-        float det = math::Dot(e1, p);
-        if (std::abs(det) < 1e-9f)
-          return false;
-        float invDet = 1.0f / det;
-        Vec3 s = r.o - a;
-        float u = math::Dot(s, p) * invDet;
-        if (u < 0 || u > 1)
-          return false;
-        Vec3 q = math::Cross(s, e1);
-        float v = math::Dot(r.d, q) * invDet;
-        if (v < 0 || u + v > 1)
-          return false;
-        float tt = math::Dot(e2, q) * invDet;
-        if (tt <= tmin || tt >= tmax)
-          return false;
-        out = tt;
-        return true;
-      }
-
-      int traverse(const Ray &r, float tmin, float tmax, bool anyHit, float &tHit) const {
-        if (m_nodes.empty())
-          return -1;
-        int stack[64];
-        int sp = 0;
-        stack[sp++] = 0;
-        int best = -1;
-        while (sp > 0) {
-          const Node &n = m_nodes[stack[--sp]];
-          if (!hitBox(r, n.mn, n.mx, tmin, tmax))
-            continue;
-          if (n.count > 0) {
-            for (int i = n.first; i < n.first + n.count; i++) {
-              float t;
-              if (hitTriangle(r, m_order[i], tmin, tmax, t)) {
-                best = m_order[i];
-                tmax = t;
-                tHit = t;
-                if (anyHit)
-                  return best;
-              }
-            }
-          } else {
-            int self = (int)(&n - m_nodes.data());
-            stack[sp++] = n.first;
-            stack[sp++] = self + 1;
-          }
-        }
-        return best;
-      }
-
-      const std::vector<Vec3> &m_tris;
-      std::vector<int> m_order;
-      std::vector<Vec3> m_centers;
-      std::vector<Node> m_nodes;
-    };
+    using detail::Bvh;
+    using detail::MakeRay;
+    using detail::Ray;
 
     // ---------------------------------------------------------------------------------------------------
     // lights
@@ -261,13 +105,13 @@ namespace quakelib {
       value *= flat + opt.angleScale * cosAngle;
 
       if (l.castShadows) {
-        Ray ray = makeRay(pos, toLight);
+        Ray ray = MakeRay(pos, toLight);
         if (l.type == BakeLight::Type::Sun) {
           float t;
-          int hit = bvh.closest(ray, 0.01f, maxT, t);
+          int hit = bvh.Closest(ray, 0.01f, maxT, t);
           if (hit >= 0 && (occ.isSky.empty() || !occ.isSky[hit]))
             return false;
-        } else if (bvh.any(ray, 0.01f, maxT)) {
+        } else if (bvh.Any(ray, 0.01f, maxT)) {
           return false;
         }
       }

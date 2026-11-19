@@ -45,3 +45,10 @@ set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 find_package(Threads REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)
+
+# the baker's ray backend: Embree or libquake's own bvh
+include(../cmake/embree.cmake)
+target_sources(${PROJECT_NAME} PRIVATE ${QLIB_BVH_SOURCE})
+if(TARGET quakelib_embree)
+  target_link_libraries(${PROJECT_NAME} PRIVATE quakelib_embree)
+endif()
