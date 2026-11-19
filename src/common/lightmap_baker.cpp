@@ -209,12 +209,13 @@ namespace quakelib {
       /// anything darkened at all
       bool Used() const { return m_used; }
 
-      /// 0 open, 1 closed in
-      float Occlusion(const Vec3 &pos, const Vec3 &normal, const Bvh &bvh, const BakeOccluders &occ) const {
+      /// 0 open, 1 closed in; depthScale scales BakeOptions::dirtDepth
+      float Occlusion(const Vec3 &pos, const Vec3 &normal, const Bvh &bvh, const BakeOccluders &occ,
+                      float depthScale = 1.0f) const {
         const Vec3 helper = std::abs(normal[2]) < 0.9f ? Vec3{0, 0, 1} : Vec3{1, 0, 0};
         const Vec3 u = math::Norm(math::Cross(helper, normal));
         const Vec3 v = math::Cross(normal, u);
-        const float depth = m_opt.dirtDepth;
+        const float depth = std::max(m_opt.dirtDepth * depthScale, 1e-3f);
         float sum = 0;
         for (const auto &d : m_directions) {
           float t = depth;
@@ -778,9 +779,11 @@ namespace quakelib {
       if (uvArea <= 0)
         return;
 
+      // the block size follows the texels on average, how far texels group or share follows their own size: a
+      // model's small texels sit next to a map's large ones in the same atlas
       const float texel = (float)std::sqrt(worldArea / uvArea);
       const int block = std::max(1, (int)std::lround(opt.quality.bounceSubdivision / texel));
-      const float reach = 2.0f * block * texel;
+      auto sizeOf = [&](const TexelSample &t) { return std::sqrt(texelArea[t.triangle]); };
       const int cols = (s.width + block - 1) / block, rows = (s.height + block - 1) / block;
       auto covered = [&](size_t o) { return samples[o].distance <= COVER_DISTANCE; };
 
@@ -806,8 +809,8 @@ namespace quakelib {
               Group *in = nullptr;
               for (auto &g : groups)
                 if (math::Dot(t.normal, g.normal) > SAME_DIRECTION &&
-                    std::abs(math::Dot(g.normal, t.surface - g.point)) < texel &&
-                    math::Len(t.surface - g.point) < reach) {
+                    std::abs(math::Dot(g.normal, t.surface - g.point)) < sizeOf(t) &&
+                    math::Len(t.surface - g.point) < 2.0f * block * sizeOf(t)) {
                   in = &g;
                   break;
                 }
@@ -877,6 +880,7 @@ namespace quakelib {
               continue;
 
             const auto &t = samples[o];
+            const float size = sizeOf(t);
             const Vec2 at{x + 0.5f, y + 0.5f};
             const int bx = x / block, by = (int)y / block;
             Vec3 sum{0, 0, 0};
@@ -887,8 +891,9 @@ namespace quakelib {
                 for (int p = first; p < end; p++) {
                   float wx = 1.0f - std::abs(at[0] - patchTexel[p][0]) / block;
                   float wy = 1.0f - std::abs(at[1] - patchTexel[p][1]) / block;
+                  const Vec3 d = t.surface - patches[p].position;
                   if (wx <= 0 || wy <= 0 || math::Dot(t.normal, patches[p].normal) <= SAME_DIRECTION ||
-                      math::Len(t.surface - patches[p].position) > reach)
+                      math::Len(d) > 2.0f * block * size || std::abs(math::Dot(patches[p].normal, d)) > size)
                     continue;
 
                   sum += bounced[p] * (wx * wy);
@@ -1050,7 +1055,9 @@ namespace quakelib {
             if (n > 1)
               pointOn(surfaces, sample.triangle, Vec2{x + (sx + 0.5f) / n, y + (sy + 0.5f) / n}, surface, normal);
             Vec3 pos = surface + normal * options.surfaceOffset;
-            float occluded = dirt.Used() ? dirt.Occlusion(pos, normal, bvh, occluders) : 0.0f;
+            const auto &scales = surfaces.dirtDepthScales;
+            float depthScale = sample.triangle < scales.size() ? scales[sample.triangle] : 1.0f;
+            float occluded = dirt.Used() ? dirt.Occlusion(pos, normal, bvh, occluders, depthScale) : 0.0f;
             if (!occlusion.empty())
               occlusion[o] += occluded * weight;
             for (uint32_t li : candidates[sample.triangle]) {

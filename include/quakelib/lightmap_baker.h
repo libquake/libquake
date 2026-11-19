@@ -141,6 +141,9 @@ namespace quakelib {
     std::vector<Vec2> uvs;       ///< 3 per triangle, in texels: texel (i, j) covers [i, i + 1) x [j, j + 1)
     /// one per triangle, the average color of its texture (0..1) for bounced light, may be empty (gray)
     std::vector<Vec3> colors;
+    /// one per triangle, scales BakeOptions::dirtDepth there, may be empty (1). A map's dirt depth fits its
+    /// architecture, small models next to it look better with less.
+    std::vector<float> dirtDepthScales;
     /// texels filled around the triangles, keeps filtering from pulling in black
     int padding = 1;
   };

@@ -814,6 +814,11 @@ TEST_CASE("ambient occlusion", "[map/lightmap]") {
   BakeOptions forced = plain;
   forced.quality.dirt = 1;
   REQUIRE(texel(BakeLightmap(floor({0, 0, 1}), wall, {light}, forced), 19, 12) == texel(dirty, 19, 12));
+
+  // a smaller depth for these triangles: 6.4 units, the wall 8 units from the texel is out of reach
+  auto shallowFloor = floor({0, 0, 1});
+  shallowFloor.dirtDepthScales = {0.05f, 0.05f};
+  REQUIRE(texel(BakeLightmap(shallowFloor, wall, {light}, dirt), 19, 12) == texel(lit, 19, 12));
 }
 
 TEST_CASE("dirt keys of the worldspawn and lights", "[map/lightmap]") {
@@ -838,6 +843,43 @@ TEST_CASE("dirt keys of the worldspawn and lights", "[map/lightmap]") {
   REQUIRE(lights[1].dirt == -1);
   REQUIRE(lights[2].type == BakeLight::Type::SkyDome);
   REQUIRE(lights[2].dirt == 1);
+}
+
+TEST_CASE("bounced light on small texels next to large ones", "[map/lightmap]") {
+  // a floor of 1024 units at 16 units per texel and two small tiles facing down at 2 units per texel, side by
+  // side in the atlas but 100 units apart in the world: one above the floor, the other below it, where no light
+  // reaches. What the first one gets must not show on the second.
+  auto scene = [](bool withNeighbour) {
+    BakeSurfaces s;
+    s.width = 84;
+    s.height = 66;
+    auto quad = [&](const Vec3 (&corners)[4], Vec3 normal, Vec2 uvMin, float unitsPerTexel, Vec2 origin) {
+      for (int k : {0, 1, 2, 0, 2, 3}) {
+        s.positions.push_back(corners[k]);
+        s.normals.push_back(normal);
+        s.uvs.push_back(uvMin + Vec2{corners[k][0] - origin[0], corners[k][1] - origin[1]} / unitsPerTexel);
+      }
+    };
+    const Vec3 floorCorners[4] = {{-512, -512, 0}, {512, -512, 0}, {512, 512, 0}, {-512, 512, 0}};
+    quad(floorCorners, {0, 0, 1}, {1, 1}, 16, {-512, -512});
+    if (withNeighbour) {
+      const Vec3 tile[4] = {{0, 0, 64}, {0, 16, 64}, {16, 16, 64}, {16, 0, 64}};
+      quad(tile, {0, 0, -1}, {67, 1}, 2, {0, 0});
+    }
+    const Vec3 tile[4] = {{40, 0, -32}, {40, 16, -32}, {56, 16, -32}, {56, 0, -32}};
+    quad(tile, {0, 0, -1}, {75, 1}, 2, {40, 0});
+    return s;
+  };
+  BakeLight light;
+  light.position = {0, 0, 32};
+  BakeOptions bounce;
+  bounce.bounces = 1;
+  auto alone = BakeLightmap(scene(false), {}, {light}, bounce);
+  auto together = BakeLightmap(scene(true), {}, {light}, bounce);
+  // texel 76 is on the edge of the second tile's island, next to the first one in the atlas
+  REQUIRE(texel(together, 70, 5) > 20);
+  REQUIRE(texel(alone, 76, 5) <= 1);
+  REQUIRE(texel(together, 76, 5) <= 1);
 }
 
 TEST_CASE("bounce keys of the worldspawn", "[map/lightmap]") {

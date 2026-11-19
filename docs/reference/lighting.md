@@ -62,6 +62,7 @@ independent share of the light fades out towards the shadow line instead of drop
 | `std::vector<Vec2> uvs` | | 3 per triangle, in texels: texel (i, j) covers [i, i + 1) × [j, j + 1) |
 | `int padding` | 1 | texels filled around the triangles |
 | `std::vector<Vec3> colors` | | one per triangle, average texture color for bounced light, may be empty (gray) |
+| `std::vector<float> dirtDepthScales` | | one per triangle, scales `BakeOptions::dirtDepth` there, may be empty (1); small models look better with less than the map's |
 
 | `BakeLight` | Default | |
 |---|---|---|
