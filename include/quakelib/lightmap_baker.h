@@ -43,6 +43,11 @@ namespace quakelib {
     float softAngle = 0.0f;     ///< spot: inner angle with full intensity, 0 means a hard edge
     int style = 0;              ///< 0 is static, 1..63 animated or switchable
     bool castShadows = true;
+    /// ambient occlusion on this light: 1 on, -1 off, 0 as BakeOptions::dirt says (key "_dirt")
+    int dirt = 0;
+    /// 0 uses BakeOptions::dirtScale / dirtGain (keys "_dirtscale", "_dirtgain")
+    float dirtScale = 0.0f;
+    float dirtGain = 0.0f;
   };
 
   /**
@@ -50,6 +55,8 @@ namespace quakelib {
    * the ericw tools.
    */
   struct BakeQuality {
+    /// samples per luxel along each side, 2 and 4 are ericw's -extra and -extra4: smoother shadow edges
+    int luxelSamples = 1;
     /// suns per sky dome, rounded to the dome's rings (ericw's -sunsamples)
     int skySamples = 64;
     /// times light bounces, -1 as the map says (BakeOptions::bounces); 1 gives old maps bounced light too
@@ -59,6 +66,12 @@ namespace quakelib {
     float bounceScale = -1.0f;
     /// size of the patches that bounce light, in map units (ericw's _bouncelightsubdivision)
     float bounceSubdivision = 64.0f;
+    /// ambient occlusion: -1 as the map says (BakeOptions::dirt), 0 none at all, 1 for every light
+    int dirt = -1;
+    /// strength of the ambient occlusion, negative as the map says (BakeOptions::dirtScale)
+    float dirtScale = -1.0f;
+    /// rays per sample for ambient occlusion, rounded to 3 rings (ericw uses 48)
+    int dirtSamples = 48;
   };
 
   struct BakeOptions {
@@ -81,6 +94,17 @@ namespace quakelib {
     float bounceColorScale = 0.0f;
     /// animated and switchable styles bounce too, otherwise only static light (worldspawn "_bouncestyled")
     bool bounceStyled = false;
+    /// ambient occlusion ("dirt") for the lights whose BakeLight::dirt is 0 (worldspawn "_dirt")
+    bool dirt = false;
+    /// how far the occlusion rays reach, in map units (worldspawn "_dirtdepth")
+    float dirtDepth = 128.0f;
+    /// strength and contrast of the occlusion (worldspawn "_dirtscale", "_dirtgain")
+    float dirtScale = 1.0f;
+    float dirtGain = 1.0f;
+    /// spread of the occlusion rays from the normal, in degrees (worldspawn "_dirtangle")
+    float dirtAngle = 88.0f;
+    /// occlusion on minLight: 1 on, -1 off, 0 as `dirt` says (worldspawn "_minlight_dirt")
+    int minLightDirt = 0;
     /// 0 uses all hardware threads
     int threads = 0;
     BakeQuality quality;
@@ -133,7 +157,9 @@ namespace quakelib {
    * Supports light / _light, _color, wait, delay, style, targetname (switchable lights get styles from 32
    * up), target / mangle (spot lights) with angle and _softangle, and on the worldspawn light / _minlight,
    * _minlight_color, _anglescale / _anglesense, _range, _sunlight, _sun_mangle, _sunlight_color, _sunlight2,
-   * _sunlight2_color, _sunlight3, _sunlight3_color, _bounce, _bouncescale, _bouncecolorscale and _bouncestyled.
+   * _sunlight2_color, _sunlight3, _sunlight3_color, _bounce, _bouncescale, _bouncecolorscale, _bouncestyled,
+   * _dirt, _dirtdepth, _dirtscale, _dirtgain, _dirtangle, _minlight_dirt, _sunlight_dirt and _sunlight2_dirt;
+   * on lights _dirt, _dirtscale and _dirtgain.
    *
    * The worldspawn is looked up in the list.
    *

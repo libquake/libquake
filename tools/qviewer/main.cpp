@@ -37,6 +37,9 @@ int main(int argc, char *argv[]) {
   args::ValueFlag<int> frames(parser, "count", "frames before the screenshot (default 30)", {"frames"});
   args::ValueFlag<double> styleTime(parser, "seconds", "freeze the light styles at this time",
                                     {"style-time"});
+  args::ValueFlag<int> luxelSamples(parser, "n",
+                                    "samples per luxel along each side when baking, 2 or 4 for smoother shadows",
+                                    {"luxel-samples"});
   args::ValueFlag<std::string> cameraPose(parser, "\"x y z yaw pitch\"",
                                           "start position in quake coordinates, C prints the current one",
                                           {"camera"});
@@ -58,6 +61,7 @@ int main(int argc, char *argv[]) {
   LoadOptions load;
   load.wadPaths = args::get(wads);
   load.bake = !noBake;
+  load.luxelSamples = luxelSamples ? args::get(luxelSamples) : 1;
 
   ViewSettings view;
   view.fullbright = fullbright;

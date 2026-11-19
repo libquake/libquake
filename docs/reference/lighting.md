@@ -76,6 +76,8 @@ independent share of the light fades out towards the shadow line instead of drop
 | `float softAngle` | 0 | spot, inner angle at full intensity |
 | `int style` | 0 | |
 | `bool castShadows` | `true` | |
+| `int dirt` | 0 | ambient occlusion on this light: 1 on, -1 off, 0 as `BakeOptions::dirt` |
+| `float dirtScale`, `dirtGain` | 0 | 0 uses the ones of `BakeOptions` |
 
 | `BakeOptions` | Default | |
 |---|---|---|
@@ -89,15 +91,24 @@ independent share of the light fades out towards the shadow line instead of drop
 | `float bounceScale` | 1 | `_bouncescale` |
 | `float bounceColorScale` | 0 | `_bouncecolorscale`, 0 bounces gray, 1 the textures' color |
 | `bool bounceStyled` | `false` | `_bouncestyled`, animated and switchable styles bounce too |
+| `bool dirt` | `false` | `_dirt`, ambient occlusion for lights whose `dirt` is 0 |
+| `float dirtDepth` | 128 | `_dirtdepth`, how far the occlusion rays reach |
+| `float dirtScale`, `dirtGain` | 1 | `_dirtscale`, `_dirtgain` |
+| `float dirtAngle` | 88 | `_dirtangle`, spread of the rays from the normal in degrees |
+| `int minLightDirt` | 0 | `_minlight_dirt`: 1 on, -1 off, 0 as `dirt` |
 | `int threads` | 0 | 0 uses all hardware threads |
 | `BakeQuality quality` | | never read from a map |
 
 | `BakeQuality` | Default | |
 |---|---|---|
+| `int luxelSamples` | 1 | samples per luxel along each side, 2 and 4 are ericw's `-extra` and `-extra4` |
 | `int skySamples` | 64 | suns per sky dome, rounded to its rings (ericw's `-sunsamples`) |
 | `int bounces` | -1 | replaces the map's `bounces`, -1 keeps them; 1 gives old maps bounced light |
 | `float bounceScale` | -1 | replaces the map's `bounceScale`, negative keeps it; lower it when bounced light brightens an old map too much |
 | `float bounceSubdivision` | 64 | map units per patch that bounces light, larger bake faster |
+| `int dirt` | -1 | ambient occlusion: -1 as the map says, 0 none at all, 1 for every light |
+| `float dirtScale` | -1 | replaces the map's `dirtScale`, negative keeps it |
+| `int dirtSamples` | 48 | rays per sample for ambient occlusion, rounded to 3 rings |
 
 A `SkyDome` is light from the whole sky, `_sunlight2` (from above) and `_sunlight3` (from below) in the ericw
 tools: suns on rings over a half sphere around `direction`, together as bright as `intensity`. Like a sun it
@@ -108,6 +119,12 @@ reflectance and area, reaches other patches with cos · cos / max(distance, 128)
 The reflectance is gray (127 / 255) mixed with the average texture color by `bounceColorScale`. Patches
 receive the bounced light and spread it over their luxels, so it costs far fewer rays than direct light.
 Far away patches facing the same way send together, as one.
+
+Ambient occlusion ("dirt") follows the ericw tools as well: `dirtSamples` rays over the half sphere above a
+sample, up to `dirtAngle` from the normal and `dirtDepth` long, give its occlusion (1 − average hit distance
+/ depth, the sky counts as open). A light keeps 1 − min(1, occlusion^gain · scale) of its value. `_dirt 1`
+darkens the sun, the sky domes and `minLight` too unless their own keys say no; bounced light is darkened
+whenever any occlusion is used.
 
 | `BakeOccluders` | |
 |---|---|

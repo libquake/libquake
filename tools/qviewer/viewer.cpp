@@ -73,6 +73,9 @@ bool Viewer::Load(const std::string &file, const LoadOptions &options) {
       quakelib::MapBuildOptions mo;
       mo.convertToOpenGL = true;
       mo.bake = options.bake;
+      quakelib::BakeQuality quality;
+      quality.luxelSamples = options.luxelSamples;
+      mo.bakeQuality = quality;
       mo.textureSize = [this](const std::string &name) { return textures.Size(name); };
       mo.textureColor = [this](const std::string &name) { return textures.AverageColor(name); };
       level = quakelib::BuildMap(doc, mo);

@@ -19,7 +19,11 @@ For historical releases, see [HISTORY.md](HISTORY.md).
 - **Bounced light**: `_bounce`, `_bouncescale`, `_bouncecolorscale` and `_bouncestyled` as in the ericw tools,
   for maps and for `BakeSurfaces`; texture colors from `MapBuildOptions::textureColor`,
   `LightmapLayoutOptions::textureColor` or `BakeSurfaces::colors`
-- **qviewer** gives the baker the average color of the wad textures
+- **Supersampling**: `BakeQuality::luxelSamples` 2 or 4, as ericw's `-extra` and `-extra4`
+- **Ambient occlusion**: `_dirt`, `_dirtdepth`, `_dirtscale`, `_dirtgain`, `_dirtangle`, `_minlight_dirt`,
+  `_sunlight_dirt`, `_sunlight2_dirt` and `_dirt` on lights as in the ericw tools; `BakeQuality::dirt`,
+  `dirtScale` and `dirtSamples`
+- **qviewer** gives the baker the average color of the wad textures; `--luxel-samples n` for final bakes
 
 ---
 

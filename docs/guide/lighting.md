@@ -57,15 +57,19 @@ Light entities (`light`, `light_fluoro`, `light_torch_small_walltorch`, ... anyt
 `target` and `mangle` for spot lights, `angle` and `_softangle`. From the worldspawn: `light` /
 `_minlight`, `_minlight_color`, `_anglescale`, `_range`, `_sunlight`, `_sun_mangle`,
 `_sunlight_color`, the sky domes `_sunlight2` / `_sunlight2_color` (light from the whole sky above) and
-`_sunlight3` / `_sunlight3_color` (from below), and bounced light with `_bounce`, `_bouncescale`,
-`_bouncecolorscale` and `_bouncestyled`.
+`_sunlight3` / `_sunlight3_color` (from below), bounced light with `_bounce`, `_bouncescale`,
+`_bouncecolorscale` and `_bouncestyled`, and ambient occlusion with `_dirt`, `_dirtdepth`, `_dirtscale`,
+`_dirtgain`, `_dirtangle`, `_minlight_dirt`, `_sunlight_dirt` and `_sunlight2_dirt` (`_dirt`, `_dirtscale`
+and `_dirtgain` on lights too).
 
 Bounced light takes on the color of the textures it bounces off as much as `_bouncecolorscale` says. libquake
 does not load texture pixels when it builds a map, `MapBuildOptions::textureColor` gives it their average
 color; without it light bounces gray. `BakeQuality` trades bake time for quality and never comes from the
 map: `bounces` turns bounced light on for maps that do not ask for it (or off), `bounceScale` dims it for maps
 lit for a compiler without bounce (Quake's own maps get quite a bit brighter), `bounceSubdivision` sets
-the size of the patches that bounce it, `skySamples` the suns of a sky dome.
+the size of the patches that bounce it, `skySamples` the suns of a sky dome. `luxelSamples` 2 or 4 samples
+every luxel 4 or 16 times for smoother shadow edges, `dirt` turns ambient occlusion on or off, `dirtScale`
+sets its strength and `dirtSamples` its rays.
 
 The world, `func_group`, `func_detail` and entities with `"_shadow" "1"` cast shadows. Sky faces block
 light. Sunlight reaches a luxel through sky or by leaving the map, so maps without sky brushes get sun

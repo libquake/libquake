@@ -768,6 +768,78 @@ TEST_CASE("bounced light", "[map/lightmap]") {
   REQUIRE(texel(red, 27, 5, 1) == 0);
 }
 
+TEST_CASE("samples per luxel", "[map/lightmap]") {
+  BakeLight light;
+  light.position = {136, 136, 128};
+  // a roof halfway up that ends 2 units past the texel's middle (x = 136): the middle is in its shadow, the
+  // samples at the far side of the texel see the light past the roof's edge
+  BakeOccluders roof;
+  roof.triangles = {{0, 0, 64}, {138, 0, 64}, {138, 256, 64}, {0, 0, 64}, {138, 256, 64}, {0, 256, 64}};
+  REQUIRE(texel(BakeLightmap(floor({0, 0, 1}), roof, {light}), 12, 12) == 0);
+
+  BakeOptions extra4;
+  extra4.quality.luxelSamples = 4;
+  int open = texel(BakeLightmap(floor({0, 0, 1}), {}, {light}, extra4), 12, 12);
+  int edge = texel(BakeLightmap(floor({0, 0, 1}), roof, {light}, extra4), 12, 12);
+  REQUIRE(edge > 0);
+  REQUIRE(edge < open / 2);
+}
+
+TEST_CASE("ambient occlusion", "[map/lightmap]") {
+  // the floor with a wall standing on its far edge, x = 256, as an occluder
+  BakeOccluders wall;
+  wall.triangles = {{256, 0, 0}, {256, 256, 0}, {256, 256, 256}, {256, 0, 0}, {256, 256, 256}, {256, 0, 256}};
+  BakeLight light;
+  light.position = {136, 136, 300};
+  light.castShadows = false;
+  light.intensity = 600;
+
+  BakeOptions plain;
+  auto lit = BakeLightmap(floor({0, 0, 1}), wall, {light}, plain);
+  BakeOptions dirt;
+  dirt.dirt = true;
+  auto dirty = BakeLightmap(floor({0, 0, 1}), wall, {light}, dirt);
+  // next to the wall the floor gets darker, in the open it stays as it is
+  REQUIRE(texel(dirty, 19, 12) < texel(lit, 19, 12) * 9 / 10);
+  REQUIRE(texel(dirty, 6, 12) == texel(lit, 6, 12));
+
+  // lights can say no, and the quality settings switch it off for everything
+  BakeLight clean = light;
+  clean.dirt = -1;
+  REQUIRE(texel(BakeLightmap(floor({0, 0, 1}), wall, {clean}, dirt), 19, 12) == texel(lit, 19, 12));
+  BakeOptions none = dirt;
+  none.quality.dirt = 0;
+  REQUIRE(texel(BakeLightmap(floor({0, 0, 1}), wall, {light}, none), 19, 12) == texel(lit, 19, 12));
+  // or on for maps that do not ask for it
+  BakeOptions forced = plain;
+  forced.quality.dirt = 1;
+  REQUIRE(texel(BakeLightmap(floor({0, 0, 1}), wall, {light}, forced), 19, 12) == texel(dirty, 19, 12));
+}
+
+TEST_CASE("dirt keys of the worldspawn and lights", "[map/lightmap]") {
+  std::vector<LevelEntity> ents(2);
+  ents[0].classname = "worldspawn";
+  ents[0].attributes = {{"_dirt", "1"},          {"_dirtdepth", "64"},     {"_dirtscale", "1.5"},
+                        {"_dirtangle", "120"},   {"_minlight_dirt", "0"},  {"_sunlight", "100"},
+                        {"_sunlight_dirt", "-1"}, {"_sunlight2", "50"},    {"_sunlight2_dirt", "1"}};
+  ents[1].classname = "light";
+  ents[1].attributes = {{"origin", "0 0 0"}, {"_dirt", "-1"}, {"_dirtgain", "2"}};
+  BakeOptions opts;
+  auto lights = QuakeLightsFromEntities(ents, false, &opts);
+  REQUIRE(opts.dirt);
+  REQUIRE(opts.dirtDepth == 64);
+  REQUIRE(opts.dirtScale == 1.5f);
+  REQUIRE(opts.dirtAngle == 90);
+  REQUIRE(opts.minLightDirt == -1);
+  REQUIRE(lights.size() == 3);
+  REQUIRE(lights[0].dirt == -1);
+  REQUIRE(lights[0].dirtGain == 2);
+  REQUIRE(lights[1].type == BakeLight::Type::Sun);
+  REQUIRE(lights[1].dirt == -1);
+  REQUIRE(lights[2].type == BakeLight::Type::SkyDome);
+  REQUIRE(lights[2].dirt == 1);
+}
+
 TEST_CASE("bounce keys of the worldspawn", "[map/lightmap]") {
   std::vector<LevelEntity> ents(1);
   ents[0].classname = "worldspawn";

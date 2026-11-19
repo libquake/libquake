@@ -17,6 +17,7 @@ qviewer -m maps/e1m1.bsp
 | `-m file` | map or bsp to open |
 | `-w path` | wad folder or file, can be repeated. Wads named by the map are used first, everything else fills the gaps |
 | `--no-bake` | skip baking for `.map` files |
+| `--luxel-samples n` | samples per luxel along each side when baking, 2 or 4 for smoother shadows |
 | `--fullbright` | start without lightmap |
 | `--wireframe` | start with the line overlay |
 | `--fog` | fog even if the map has no `fog` key |

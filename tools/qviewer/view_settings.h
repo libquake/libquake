@@ -27,6 +27,7 @@ struct ViewSettings {
 struct LoadOptions {
   std::vector<std::string> wadPaths; ///< folders or .wad files
   bool bake = true;                  ///< bake the lights of .map files
+  int luxelSamples = 1;              ///< samples per luxel along each side, 4 for a final bake
 };
 
 /// headless runs: save a screenshot after some frames and quit

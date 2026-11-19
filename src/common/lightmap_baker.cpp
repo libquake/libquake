@@ -174,20 +174,111 @@ namespace quakelib {
       return true;
     }
 
+    /// Ambient occlusion as the ericw tools do it ("dirt"): rays over the half sphere above a sample, the
+    /// nearer they hit something the darker the light gets.
+    class Dirt {
+    public:
+      Dirt(const BakeOptions &opt, const std::vector<BakeLight> &lights) : m_opt(opt) {
+        const int quality = opt.quality.dirt;
+        if (quality == 0)
+          return;
+
+        m_global = quality == 1 || (quality < 0 && opt.dirt);
+        m_minLight = opt.minLightDirt == 1 || (opt.minLightDirt == 0 && m_global);
+        m_scale = opt.quality.dirtScale >= 0 ? opt.quality.dirtScale : opt.dirtScale;
+        m_used = m_global || m_minLight;
+        for (const auto &l : lights)
+          m_used |= l.dirt == 1;
+        if (!m_used)
+          return;
+
+        // 3 rings up to dirtAngle from the normal, as many directions around as the samples allow
+        const int rings = 3;
+        const int around = std::max(4, (int)std::lround(opt.quality.dirtSamples / (float)rings));
+        const float ringStep = opt.dirtAngle * (float)HMM_PI / 180.0f / rings;
+        for (int a = 0; a < around; a++) {
+          float angle = a * 2.0f * (float)HMM_PI / around;
+          for (int r = 0; r < rings; r++) {
+            float elevation = ringStep * (r + 0.5f);
+            m_directions.push_back(Vec3{std::sin(elevation) * std::cos(angle), std::sin(elevation) * std::sin(angle),
+                                        std::cos(elevation)});
+          }
+        }
+      }
+
+      /// anything darkened at all
+      bool Used() const { return m_used; }
+
+      /// 0 open, 1 closed in
+      float Occlusion(const Vec3 &pos, const Vec3 &normal, const Bvh &bvh, const BakeOccluders &occ) const {
+        const Vec3 helper = std::abs(normal[2]) < 0.9f ? Vec3{0, 0, 1} : Vec3{1, 0, 0};
+        const Vec3 u = math::Norm(math::Cross(helper, normal));
+        const Vec3 v = math::Cross(normal, u);
+        const float depth = m_opt.dirtDepth;
+        float sum = 0;
+        for (const auto &d : m_directions) {
+          float t = depth;
+          int hit = bvh.Closest(MakeRay(pos, u * d[0] + v * d[1] + normal * d[2]), 0.01f, depth, t);
+          // the sky counts as open
+          if (hit < 0 || (!occ.isSky.empty() && occ.isSky[hit]))
+            t = depth;
+          sum += std::min(t, depth);
+        }
+        return 1.0f - sum / m_directions.size() / depth;
+      }
+
+      /// what is left of a light's value
+      float ForLight(const BakeLight &l, float occlusion) const {
+        bool on = l.dirt == 1 || (l.dirt == 0 && m_global);
+        if (!m_used || !on)
+          return 1.0f;
+
+        return factor(occlusion, l.dirtScale > 0 ? l.dirtScale : m_scale, l.dirtGain > 0 ? l.dirtGain : m_opt.dirtGain);
+      }
+
+      /// what is left of bounced light
+      float ForBounce(float occlusion) const { return m_used ? factor(occlusion, m_scale, m_opt.dirtGain) : 1.0f; }
+
+      /// what is left of minLight
+      float ForMinLight(float occlusion) const {
+        return m_used && m_minLight ? factor(occlusion, m_scale, m_opt.dirtGain) : 1.0f;
+      }
+
+    private:
+      static float factor(float occlusion, float scale, float gain) {
+        if (occlusion <= 0)
+          return 1.0f;
+
+        float dirt = std::min(1.0f, std::pow(occlusion, gain));
+        return 1.0f - std::min(1.0f, dirt * scale);
+      }
+
+      const BakeOptions &m_opt;
+      bool m_used = false;
+      bool m_global = false;
+      bool m_minLight = false;
+      float m_scale = 1.0f;
+      std::vector<Vec3> m_directions; // around z, z is the normal
+    };
+
     void applyRangeScale(std::vector<Vec3> &layer, const BakeOptions &opt) {
       for (auto &v : layer)
         v = v * opt.rangeScale;
     }
 
-    void applyAmbientAndMinLight(std::vector<Vec3> &staticLayer, const BakeOptions &opt) {
+    /// occlusion: per value, may be empty
+    void applyAmbientAndMinLight(std::vector<Vec3> &staticLayer, const BakeOptions &opt, const Dirt &dirt,
+                                 const std::vector<float> &occlusion) {
       for (auto &v : staticLayer)
         v += opt.ambient;
       if (opt.minLight <= 0)
         return;
-      Vec3 ml = opt.minLightColor * opt.minLight;
-      for (auto &v : staticLayer)
+      const Vec3 ml = opt.minLightColor * opt.minLight;
+      for (size_t i = 0; i < staticLayer.size(); i++) {
+        Vec3 least = occlusion.empty() ? ml : ml * dirt.ForMinLight(occlusion[i]);
         for (int a = 0; a < 3; a++)
-          v[a] = std::max(v[a], ml[a]);
+          staticLayer[i][a] = std::max(staticLayer[i][a], least[a]);
+      }
     }
 
     float maxComponent(const Vec3 &v) { return std::max({v[0], v[1], v[2]}); }
@@ -228,6 +319,8 @@ namespace quakelib {
       // for bounced light, per luxel: inside the chart's triangles, the triangle it samples
       std::vector<uint8_t> inside;
       std::vector<uint32_t> triangle;
+      // per luxel, with ambient occlusion only
+      std::vector<float> occlusion;
 
       std::vector<Vec3> &Style(int style, size_t size) {
         for (size_t i = 0; i < styles.size(); i++)
@@ -241,7 +334,7 @@ namespace quakelib {
 
     ChartResult bakeChart(const LightmapChart &chart, float L, const Bvh &bvh, const BakeOccluders &occ,
                           const std::vector<BakeLight> &lights, const std::vector<float> &ranges,
-                          const BakeOptions &opt) {
+                          const BakeOptions &opt, const Dirt &dirt) {
       ChartResult res;
       const int w = chart.width, h = chart.height;
 
@@ -292,54 +385,74 @@ namespace quakelib {
         res.triangle.assign(size, 0);
       }
 
+      if (dirt.Used())
+        res.occlusion.assign(size, 0.0f);
+
+      // a point in luxel space onto the triangles, a bit inside, so luxels off the polygon do not sample behind
+      // walls
       const float pushInside = 1.0f / L; // one map unit, in luxels
+      auto onSurface = [&](Vec2 q, bool &inside, uint32_t &triangle) {
+        inside = false;
+        triangle = 0;
+        for (uint32_t ti = 0; ti < tris.size(); ti++)
+          if (insideTri(q, tris[ti])) {
+            inside = true;
+            triangle = ti;
+            return q;
+          }
+        float best = 1e30f;
+        Vec2 bestP = q;
+        for (uint32_t ti = 0; ti < tris.size(); ti++) {
+          const auto &t = tris[ti];
+          const Vec2 *e[3][2] = {{&t.a, &t.b}, {&t.b, &t.c}, {&t.c, &t.a}};
+          Vec2 center = (t.a + t.b + t.c) / 3.0f;
+          for (auto &edge : e) {
+            Vec2 c = closestOnSegment(q, *edge[0], *edge[1]);
+            Vec2 dd = c - q;
+            float d = math::Dot(dd, dd);
+            if (d < best) {
+              best = d;
+              triangle = ti;
+              Vec2 toCenter = center - c;
+              float len = math::Len(toCenter);
+              bestP = len > pushInside ? c + toCenter * (pushInside / len) : center;
+            }
+          }
+        }
+        return bestP;
+      };
+
+      // samples spread evenly over the luxel's square, one at its center without supersampling
+      const int n = std::clamp(opt.quality.luxelSamples, 1, 8);
+      const float weight = 1.0f / (float)(n * n);
       for (int j = 0; j < h; j++) {
         for (int i = 0; i < w; i++) {
-          // move luxels outside the polygon onto it, a bit inside, so they do not sample behind walls
-          Vec2 q{(float)i, (float)j};
-          bool inside = false;
-          uint32_t triangle = 0;
-          for (uint32_t ti = 0; ti < tris.size(); ti++)
-            if (insideTri(q, tris[ti])) {
-              inside = true;
-              triangle = ti;
-              break;
-            }
-          if (!inside) {
-            float best = 1e30f;
-            Vec2 bestP = q;
-            for (uint32_t ti = 0; ti < tris.size(); ti++) {
-              const auto &t = tris[ti];
-              const Vec2 *e[3][2] = {{&t.a, &t.b}, {&t.b, &t.c}, {&t.c, &t.a}};
-              Vec2 center = (t.a + t.b + t.c) / 3.0f;
-              for (auto &edge : e) {
-                Vec2 c = closestOnSegment(q, *edge[0], *edge[1]);
-                Vec2 dd = c - q;
-                float d = math::Dot(dd, dd);
-                if (d < best) {
-                  best = d;
-                  triangle = ti;
-                  Vec2 toCenter = center - c;
-                  float len = math::Len(toCenter);
-                  bestP = len > pushInside ? c + toCenter * (pushInside / len) : center;
-                }
-              }
-            }
-            q = bestP;
-          }
-
-          Vec3 pos = chart.LuxelPosition(q[0], q[1], L) + chart.normal * opt.surfaceOffset;
           size_t o = (size_t)j * w + i;
           if (!res.inside.empty()) {
+            bool inside;
+            uint32_t triangle;
+            onSurface(Vec2{(float)i, (float)j}, inside, triangle);
             res.inside[o] = inside;
             res.triangle[o] = triangle;
           }
 
-          for (int li : active) {
-            Vec3 value;
-            if (lightAt(lights[li], pos, chart.normal, false, bvh, occ, opt, value))
-              res.Style(lights[li].style, size)[o] += value;
-          }
+          float occlusion = 0;
+          for (int sy = 0; sy < n; sy++)
+            for (int sx = 0; sx < n; sx++) {
+              bool inside;
+              uint32_t triangle;
+              Vec2 q = onSurface(Vec2{i + (sx + 0.5f) / n - 0.5f, j + (sy + 0.5f) / n - 0.5f}, inside, triangle);
+              Vec3 pos = chart.LuxelPosition(q[0], q[1], L) + chart.normal * opt.surfaceOffset;
+              float occluded = dirt.Used() ? dirt.Occlusion(pos, chart.normal, bvh, occ) : 0.0f;
+              occlusion += occluded * weight;
+              for (int li : active) {
+                Vec3 value;
+                if (lightAt(lights[li], pos, chart.normal, false, bvh, occ, opt, value))
+                  res.Style(lights[li].style, size)[o] += value * (weight * dirt.ForLight(lights[li], occluded));
+              }
+            }
+          if (!res.occlusion.empty())
+            res.occlusion[o] = occlusion;
         }
       }
       return res;
@@ -355,7 +468,7 @@ namespace quakelib {
     /// Bounced light for planar charts: blocks of luxels in each chart are the patches, the light they
     /// receive is spread back over the luxels bilinearly between the blocks of the same chart.
     void bounceCharts(const LightmapLayout &layout, std::vector<ChartResult> &results, const Bvh &bvh,
-                      const BakeOptions &opt) {
+                      const BakeOptions &opt, const Dirt &dirt) {
       const float L = layout.luxelSize;
       const int block = std::max(1, (int)std::lround(opt.quality.bounceSubdivision / L));
 
@@ -477,7 +590,9 @@ namespace quakelib {
                 sum = bounced[id];
                 weights = 1;
               }
-              values[(size_t)j * chart.width + i] += sum / weights;
+              size_t o = (size_t)j * chart.width + i;
+              const auto &occlusion = results[c].occlusion;
+              values[o] += sum / weights * (occlusion.empty() ? 1.0f : dirt.ForBounce(occlusion[o]));
             }
         });
       }
@@ -613,11 +728,39 @@ namespace quakelib {
       return samples;
     }
 
+    /// Position and normal of triangle t at atlas position p, moved onto the triangle when p is off it.
+    void pointOn(const BakeSurfaces &s, uint32_t t, const Vec2 &p, Vec3 &position, Vec3 &normal) {
+      const size_t k = (size_t)t * 3;
+      const Vec2 &a = s.uvs[k], &b = s.uvs[k + 1], &c = s.uvs[k + 2];
+      Vec3 w = barycentric(p, a, b, c);
+      if (w[0] < 0 || w[1] < 0 || w[2] < 0) {
+        Vec2 closest = p;
+        float distance = 1e30f;
+        const Vec2 *edges[3][2] = {{&a, &b}, {&b, &c}, {&c, &a}};
+        for (auto &edge : edges) {
+          Vec2 q = closestOnSegment(p, *edge[0], *edge[1]);
+          if (math::Len(q - p) < distance) {
+            distance = math::Len(q - p);
+            closest = q;
+          }
+        }
+        w = barycentric(closest, a, b, c);
+        for (int i = 0; i < 3; i++)
+          w[i] += (1.0f / 3.0f - w[i]) * PULL_INSIDE;
+      }
+      position = s.positions[k] * w[0] + s.positions[k + 1] * w[1] + s.positions[k + 2] * w[2];
+      Vec3 n = s.normals[k] * w[0] + s.normals[k + 1] * w[1] + s.normals[k + 2] * w[2];
+      normal = math::Len(n) > 1e-6f
+                   ? math::Norm(n)
+                   : math::Norm(math::Cross(s.positions[k + 1] - s.positions[k], s.positions[k + 2] - s.positions[k]));
+    }
+
     /// Bounced light for surfaces of any shape. The patches are blocks of the atlas, split by the direction and
     /// place of the surface under each texel; the light they receive goes back to the texels near them that
     /// face the same way, so it does not bleed between neighbours in the atlas.
     void bounceSurfaces(const BakeSurfaces &s, const std::vector<TexelSample> &samples,
-                        std::vector<std::vector<Vec3>> &values, const Bvh &bvh, const BakeOptions &opt) {
+                        std::vector<std::vector<Vec3>> &values, const Bvh &bvh, const BakeOptions &opt,
+                        const Dirt &dirt, const std::vector<float> &occlusion) {
       constexpr float SAME_DIRECTION = 0.9f;
 
       // map units per texel over all triangles, and the area each texel of a triangle covers
@@ -752,7 +895,8 @@ namespace quakelib {
                   weights += wx * wy;
                 }
               }
-            values[layer][o] += weights > 0 ? sum / weights : bounced[patchOf[o]];
+            Vec3 add = weights > 0 ? sum / weights : bounced[patchOf[o]];
+            values[layer][o] += add * (occlusion.empty() ? 1.0f : dirt.ForBounce(occlusion[o]));
           }
         });
       }
@@ -800,16 +944,17 @@ namespace quakelib {
 
     Bvh bvh(occluders.triangles);
 
+    const Dirt dirt(options, ls);
     std::vector<ChartResult> results(layout.charts.size());
     ParallelFor(layout.charts.size(), options.threads, [&](size_t c) {
-      results[c] = bakeChart(layout.charts[c], layout.luxelSize, bvh, occluders, ls, ranges, options);
+      results[c] = bakeChart(layout.charts[c], layout.luxelSize, bvh, occluders, ls, ranges, options, dirt);
     });
     if (bounceCount(options) > 0)
-      bounceCharts(layout, results, bvh, options);
+      bounceCharts(layout, results, bvh, options, dirt);
     ParallelFor(results.size(), options.threads, [&](size_t c) {
       for (auto &layer : results[c].values)
         applyRangeScale(layer, options);
-      applyAmbientAndMinLight(results[c].values[0], options);
+      applyAmbientAndMinLight(results[c].values[0], options, dirt, results[c].occlusion);
     });
 
     // layers in style order, 0 first
@@ -888,36 +1033,50 @@ namespace quakelib {
     Bvh bvh(occluders.triangles);
     auto candidates = lightsPerTriangle(surfaces, ls, ranges, options.threads);
 
+    const Dirt dirt(options, ls);
+    std::vector<float> occlusion(dirt.Used() ? texels : 0, 0.0f);
+    // samples spread evenly over the texel's square, one at its center without supersampling
+    const int n = std::clamp(options.quality.luxelSamples, 1, 8);
+    const float weight = 1.0f / (float)(n * n);
     ParallelFor((size_t)out.height, options.threads, [&](size_t y) {
       for (int x = 0; x < out.width; x++) {
         size_t o = y * out.width + x;
         const auto &sample = samples[o];
         if (sample.distance > COVER_DISTANCE)
           continue;
-        Vec3 pos = sample.surface + sample.normal * options.surfaceOffset;
-        for (uint32_t li : candidates[sample.triangle]) {
-          const auto &l = ls[li];
-          if (l.type != BakeLight::Type::Sun) {
-            Vec3 toLight = l.position - sample.surface;
-            if (math::Dot(sample.normal, toLight) <= 0 || math::Len(toLight) > ranges[li])
-              continue;
+        for (int sy = 0; sy < n; sy++)
+          for (int sx = 0; sx < n; sx++) {
+            Vec3 surface = sample.surface, normal = sample.normal;
+            if (n > 1)
+              pointOn(surfaces, sample.triangle, Vec2{x + (sx + 0.5f) / n, y + (sy + 0.5f) / n}, surface, normal);
+            Vec3 pos = surface + normal * options.surfaceOffset;
+            float occluded = dirt.Used() ? dirt.Occlusion(pos, normal, bvh, occluders) : 0.0f;
+            if (!occlusion.empty())
+              occlusion[o] += occluded * weight;
+            for (uint32_t li : candidates[sample.triangle]) {
+              const auto &l = ls[li];
+              if (l.type != BakeLight::Type::Sun) {
+                Vec3 toLight = l.position - surface;
+                if (math::Dot(normal, toLight) <= 0 || math::Len(toLight) > ranges[li])
+                  continue;
+              }
+              Vec3 value;
+              if (lightAt(l, pos, normal, sample.smooth, bvh, occluders, options, value))
+                values[layerOf[li]][o] += value * (weight * dirt.ForLight(l, occluded));
+            }
           }
-          Vec3 value;
-          if (lightAt(l, pos, sample.normal, sample.smooth, bvh, occluders, options, value))
-            values[layerOf[li]][o] += value;
-        }
       }
     });
 
     if (bounceCount(options) > 0)
-      bounceSurfaces(surfaces, samples, values, bvh, options);
+      bounceSurfaces(surfaces, samples, values, bvh, options, dirt, occlusion);
 
     std::vector<uint8_t> covered(texels, 0);
     for (size_t o = 0; o < texels; o++)
       covered[o] = samples[o].distance <= COVER_DISTANCE;
     for (auto &layer : values)
       applyRangeScale(layer, options);
-    applyAmbientAndMinLight(values[0], options);
+    applyAmbientAndMinLight(values[0], options, dirt, occlusion);
 
     out.layers.assign(out.styles.size(), std::vector<uint8_t>(texels * 4, 0));
     for (size_t s = 0; s < values.size(); s++)
@@ -976,6 +1135,9 @@ namespace quakelib {
       l.falloff = (delay >= 0 && delay <= 5) ? (BakeLight::Falloff)delay : BakeLight::Falloff::Linear;
 
       l.style = std::atoi(e.Get("style").c_str());
+      l.dirt = std::clamp(std::atoi(e.Get("_dirt").c_str()), -1, 1);
+      l.dirtScale = std::max(0.0f, (float)std::atof(e.Get("_dirtscale").c_str()));
+      l.dirtGain = std::max(0.0f, (float)std::atof(e.Get("_dirtgain").c_str()));
       auto targetname = e.Get("targetname");
       if (l.style == 0 && !targetname.empty()) {
         auto [it, inserted] = switchable.try_emplace(targetname, 32 + (int)switchable.size());
@@ -1010,6 +1172,21 @@ namespace quakelib {
                                                         : worldspawn->Get("_anglesense");
       if (!as.empty())
         opts.angleScale = std::clamp((float)std::atof(as.c_str()), 0.0f, 1.0f);
+      auto dirtKey = !worldspawn->Get("_dirt").empty() ? worldspawn->Get("_dirt") : worldspawn->Get("_dirty");
+      opts.dirt = std::atoi(dirtKey.c_str()) > 0;
+      auto positive = [&](const char *key, float &value) {
+        float v = (float)std::atof(worldspawn->Get(key).c_str());
+        if (v > 0)
+          value = v;
+      };
+      positive("_dirtdepth", opts.dirtDepth);
+      positive("_dirtscale", opts.dirtScale);
+      positive("_dirtgain", opts.dirtGain);
+      positive("_dirtangle", opts.dirtAngle);
+      opts.dirtAngle = std::min(opts.dirtAngle, 90.0f);
+      // set: 1 on, anything else off; not set: as _dirt says
+      auto minLightDirt = worldspawn->Get("_minlight_dirt");
+      opts.minLightDirt = minLightDirt.empty() ? 0 : (std::atoi(minLightDirt.c_str()) == 1 ? 1 : -1);
       opts.bounces = std::max(0, std::atoi(worldspawn->Get("_bounce").c_str()));
       if (!worldspawn->Get("_bouncescale").empty())
         opts.bounceScale = std::max(0.0f, (float)std::atof(worldspawn->Get("_bouncescale").c_str()));
@@ -1029,6 +1206,7 @@ namespace quakelib {
         s.direction = toEngine(m.empty() ? Vec3{0, 0, -1} : mangleDirection(m));
         if (!worldspawn->Get("_sunlight_color").empty())
           s.color = parseColor(worldspawn->Get("_sunlight_color"));
+        s.dirt = std::clamp(std::atoi(worldspawn->Get("_sunlight_dirt").c_str()), -1, 1);
         lights.push_back(s);
       }
 
@@ -1049,6 +1227,8 @@ namespace quakelib {
         dome.type = BakeLight::Type::SkyDome;
         dome.intensity = value;
         dome.direction = toEngine(Vec3{0, 0, d.z});
+        // one key for both domes, as in the ericw tools
+        dome.dirt = std::clamp(std::atoi(worldspawn->Get("_sunlight2_dirt").c_str()), -1, 1);
         auto color = !worldspawn->Get(d.color).empty() ? worldspawn->Get(d.color) : worldspawn->Get(d.colorAlias);
         if (!color.empty())
           dome.color = parseColor(color);
