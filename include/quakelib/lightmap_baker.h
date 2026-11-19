@@ -54,6 +54,9 @@ namespace quakelib {
     int skySamples = 64;
     /// times light bounces, -1 as the map says (BakeOptions::bounces); 1 gives old maps bounced light too
     int bounces = -1;
+    /// brightness of the bounced light, negative as the map says (BakeOptions::bounceScale); lower it when
+    /// bounced light makes an old map too bright
+    float bounceScale = -1.0f;
     /// size of the patches that bounce light, in map units (ericw's _bouncelightsubdivision)
     float bounceSubdivision = 64.0f;
   };

@@ -757,6 +757,9 @@ TEST_CASE("bounced light", "[map/lightmap]") {
   BakeOptions off = bounce;
   off.quality.bounces = 0;
   REQUIRE(texel(BakeLightmap(scene({0.5f, 0.5f, 0.5f}), {}, {spot}, off), 27, 5) == 0);
+  BakeOptions dimmer = bounce;
+  dimmer.quality.bounceScale = 0.5f;
+  REQUIRE(std::abs(texel(BakeLightmap(scene({0.5f, 0.5f, 0.5f}), {}, {spot}, dimmer), 27, 5) - gray / 2) <= 1);
 
   // the color of a red floor shows on the wall when bounceColorScale lets it
   bounce.bounceColorScale = 1;

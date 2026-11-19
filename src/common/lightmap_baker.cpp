@@ -195,6 +195,10 @@ namespace quakelib {
     // the map's bounces unless the quality settings say otherwise
     int bounceCount(const BakeOptions &opt) { return opt.quality.bounces >= 0 ? opt.quality.bounces : opt.bounces; }
 
+    float bounceScale(const BakeOptions &opt) {
+      return opt.quality.bounceScale >= 0 ? opt.quality.bounceScale : opt.bounceScale;
+    }
+
     // ---------------------------------------------------------------------------------------------------
     // chart sampling
 
@@ -430,7 +434,7 @@ namespace quakelib {
           light[p] = light[p] / (float)members[p].size();
         }
 
-        auto bounced = BounceLight(patches, light, bvh, bounceCount(opt), opt.bounceScale, opt.surfaceOffset,
+        auto bounced = BounceLight(patches, light, bvh, bounceCount(opt), bounceScale(opt), opt.surfaceOffset,
                                    opt.threads);
 
         ParallelFor(layout.charts.size(), opt.threads, [&](size_t c) {
@@ -720,7 +724,7 @@ namespace quakelib {
           light[p] = light[p] / (float)members[p].size();
         }
 
-        auto bounced = BounceLight(patches, light, bvh, bounceCount(opt), opt.bounceScale, opt.surfaceOffset,
+        auto bounced = BounceLight(patches, light, bvh, bounceCount(opt), bounceScale(opt), opt.surfaceOffset,
                                    opt.threads);
 
         ParallelFor((size_t)s.height, opt.threads, [&](size_t y) {

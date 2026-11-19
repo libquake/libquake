@@ -14,7 +14,8 @@ For historical releases, see [HISTORY.md](HISTORY.md).
 - **qviewer**: `--camera "x y z yaw pitch"` sets the start position, C prints the current one
 - **Sky domes**: `_sunlight2` and `_sunlight3` with their colors, `BakeLight::Type::SkyDome`
 - **`BakeQuality`**: settings that trade bake time for quality and never come from a map: `skySamples`,
-  `bounces` (replaces the map's, -1 keeps it), `bounceSubdivision`; `MapBuildOptions::bakeQuality`
+  `bounces` and `bounceScale` (replace the map's, -1 keeps it), `bounceSubdivision`;
+  `MapBuildOptions::bakeQuality`
 - **Bounced light**: `_bounce`, `_bouncescale`, `_bouncecolorscale` and `_bouncestyled` as in the ericw tools,
   for maps and for `BakeSurfaces`; texture colors from `MapBuildOptions::textureColor`,
   `LightmapLayoutOptions::textureColor` or `BakeSurfaces::colors`

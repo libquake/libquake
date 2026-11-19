@@ -63,7 +63,8 @@ Light entities (`light`, `light_fluoro`, `light_torch_small_walltorch`, ... anyt
 Bounced light takes on the color of the textures it bounces off as much as `_bouncecolorscale` says. libquake
 does not load texture pixels when it builds a map, `MapBuildOptions::textureColor` gives it their average
 color; without it light bounces gray. `BakeQuality` trades bake time for quality and never comes from the
-map: `bounces` turns bounced light on for maps that do not ask for it (or off), `bounceSubdivision` sets
+map: `bounces` turns bounced light on for maps that do not ask for it (or off), `bounceScale` dims it for maps
+lit for a compiler without bounce (Quake's own maps get quite a bit brighter), `bounceSubdivision` sets
 the size of the patches that bounce it, `skySamples` the suns of a sky dome.
 
 The world, `func_group`, `func_detail` and entities with `"_shadow" "1"` cast shadows. Sky faces block

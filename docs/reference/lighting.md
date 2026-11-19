@@ -96,6 +96,7 @@ independent share of the light fades out towards the shadow line instead of drop
 |---|---|---|
 | `int skySamples` | 64 | suns per sky dome, rounded to its rings (ericw's `-sunsamples`) |
 | `int bounces` | -1 | replaces the map's `bounces`, -1 keeps them; 1 gives old maps bounced light |
+| `float bounceScale` | -1 | replaces the map's `bounceScale`, negative keeps it; lower it when bounced light brightens an old map too much |
 | `float bounceSubdivision` | 64 | map units per patch that bounces light, larger bake faster |
 
 A `SkyDome` is light from the whole sky, `_sunlight2` (from above) and `_sunlight3` (from below) in the ericw
