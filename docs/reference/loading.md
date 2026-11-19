@@ -71,6 +71,7 @@ Level BuildMap(const MapDocument &doc, const MapBuildOptions &options = {},
 | `bool csg` | `true` | remove faces hidden by other brushes of the same entity |
 | `bool convertToOpenGL` | `false` | applied after building and baking |
 | `std::function<std::pair<int, int>(const std::string &)> textureSize` | none | width and height by texture name |
+| `std::function<Vec3(const std::string &)> textureColor` | none | average color (0..1) by texture name, for bounced light; gray without |
 | `std::map<std::string, SurfaceType> faceTypes` | empty | by texture name without path, case insensitive |
 | `LightmapUVOptions lightmapUV` | planar | see [Lighting](lighting.md#lightmapuvoptions) |
 | `bool bake` | `false` | needs planar uvs |

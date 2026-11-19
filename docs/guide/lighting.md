@@ -50,14 +50,21 @@ their assigned styles.
 ## Baking map lights
 
 `BuildMap` with `bake = true` lights the map the way the Quake light tools do: direct light with shadows,
-no bounce.
+light from the sky and, when the map asks for it, bounced light.
 
 Light entities (`light`, `light_fluoro`, `light_torch_small_walltorch`, ... anything starting with
 `light`) and their usual keys are read: `light`, `_color`, `wait`, `delay`, `style`, `targetname`,
 `target` and `mangle` for spot lights, `angle` and `_softangle`. From the worldspawn: `light` /
 `_minlight`, `_minlight_color`, `_anglescale`, `_range`, `_sunlight`, `_sun_mangle`,
-`_sunlight_color`, and the sky domes `_sunlight2` / `_sunlight2_color` (light from the whole sky above) and
-`_sunlight3` / `_sunlight3_color` (from below).
+`_sunlight_color`, the sky domes `_sunlight2` / `_sunlight2_color` (light from the whole sky above) and
+`_sunlight3` / `_sunlight3_color` (from below), and bounced light with `_bounce`, `_bouncescale`,
+`_bouncecolorscale` and `_bouncestyled`.
+
+Bounced light takes on the color of the textures it bounces off as much as `_bouncecolorscale` says. libquake
+does not load texture pixels when it builds a map, `MapBuildOptions::textureColor` gives it their average
+color; without it light bounces gray. `BakeQuality` trades bake time for quality and never comes from the
+map: `bounces` turns bounced light on for maps that do not ask for it (or off), `bounceSubdivision` sets
+the size of the patches that bounce it, `skySamples` the suns of a sky dome.
 
 The world, `func_group`, `func_detail` and entities with `"_shadow" "1"` cast shadows. Sky faces block
 light. Sunlight reaches a luxel through sky or by leaving the map, so maps without sky brushes get sun

@@ -713,6 +713,71 @@ namespace {
   }
 } // namespace
 
+TEST_CASE("bounced light", "[map/lightmap]") {
+  // a floor and a wall standing on its far edge, facing it: texels 1..17 and 19..35 of a 36 x 18 atlas
+  auto scene = [](Vec3 floorColor) {
+    BakeSurfaces s;
+    s.width = 36;
+    s.height = 18;
+    const Vec3 floorCorners[4] = {{0, 0, 0}, {256, 0, 0}, {256, 256, 0}, {0, 256, 0}};
+    const Vec3 wallCorners[4] = {{256, 0, 0}, {256, 256, 0}, {256, 256, 256}, {256, 0, 256}};
+    for (int k : {0, 1, 2, 0, 2, 3}) {
+      s.positions.push_back(floorCorners[k]);
+      s.normals.push_back({0, 0, 1});
+      s.uvs.push_back(Vec2{floorCorners[k][0] / 16 + 1, floorCorners[k][1] / 16 + 1});
+    }
+    for (int k : {0, 2, 1, 0, 3, 2}) {
+      s.positions.push_back(wallCorners[k]);
+      s.normals.push_back({-1, 0, 0});
+      s.uvs.push_back(Vec2{wallCorners[k][1] / 16 + 19, wallCorners[k][2] / 16 + 1});
+    }
+    s.colors = {floorColor, floorColor, {0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}};
+    return s;
+  };
+  // straight down onto the floor, its cone ends before the wall
+  BakeLight spot;
+  spot.type = BakeLight::Type::Spot;
+  spot.position = {96, 128, 128};
+  spot.direction = {0, 0, -1};
+  spot.intensity = 600;
+  spot.coneAngle = 60;
+
+  BakeOptions direct;
+  REQUIRE(texel(BakeLightmap(scene({0.5f, 0.5f, 0.5f}), {}, {spot}, direct), 27, 5) == 0);
+
+  BakeOptions bounce;
+  bounce.bounces = 1;
+  int gray = texel(BakeLightmap(scene({0.5f, 0.5f, 0.5f}), {}, {spot}, bounce), 27, 5);
+  REQUIRE(gray > 0);
+
+  // the quality settings win over the map's bounces, both ways
+  BakeOptions forced = direct;
+  forced.quality.bounces = 1;
+  REQUIRE(texel(BakeLightmap(scene({0.5f, 0.5f, 0.5f}), {}, {spot}, forced), 27, 5) == gray);
+  BakeOptions off = bounce;
+  off.quality.bounces = 0;
+  REQUIRE(texel(BakeLightmap(scene({0.5f, 0.5f, 0.5f}), {}, {spot}, off), 27, 5) == 0);
+
+  // the color of a red floor shows on the wall when bounceColorScale lets it
+  bounce.bounceColorScale = 1;
+  auto red = BakeLightmap(scene({1, 0, 0}), {}, {spot}, bounce);
+  REQUIRE(texel(red, 27, 5, 0) > gray);
+  REQUIRE(texel(red, 27, 5, 1) == 0);
+}
+
+TEST_CASE("bounce keys of the worldspawn", "[map/lightmap]") {
+  std::vector<LevelEntity> ents(1);
+  ents[0].classname = "worldspawn";
+  ents[0].attributes = {
+      {"_bounce", "2"}, {"_bouncescale", "0.3"}, {"_bouncecolorscale", "2"}, {"_bouncestyled", "1"}};
+  BakeOptions opts;
+  QuakeLightsFromEntities(ents, false, &opts);
+  REQUIRE(opts.bounces == 2);
+  REQUIRE(std::abs(opts.bounceScale - 0.3f) < 1e-6f);
+  REQUIRE(opts.bounceColorScale == 1);
+  REQUIRE(opts.bounceStyled);
+}
+
 TEST_CASE("brush entity pivots", "[map/level]") {
   std::string text = "{\n\"classname\" \"worldspawn\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") + "}\n";
   text += "{\n\"classname\" \"func_wall\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") + "}\n";
@@ -833,4 +898,26 @@ TEST_CASE("water does not hide what is under it", "[map/csg]") {
   REQUIRE(std::abs(areaFacing("ground1", 1) - 256.0f * 256.0f) < 1.0f);
   REQUIRE(areaFacing("*water1", 1) > 0);
   REQUIRE(areaFacing("*water1", -1) == 0);
+}
+
+TEST_CASE("bounced light in a map", "[map/lightmap]") {
+  auto room = [](bool bounce) {
+    std::string text = "{\n\"classname\" \"worldspawn\"\n";
+    if (bounce)
+      text += "\"_bounce\" \"1\"\n";
+    text += box({-272, -272, -16}, {272, 272, 0}, "ground1") + box({-272, -272, 256}, {272, 272, 272}, "ground1") +
+            box({-272, -272, 0}, {-256, 272, 256}, "ground1") + box({256, -272, 0}, {272, 272, 256}, "ground1") +
+            box({-256, -272, 0}, {256, -256, 256}, "ground1") + box({-256, 256, 0}, {256, 272, 256}, "ground1");
+    text += "}\n{\n\"classname\" \"light\"\n\"origin\" \"0 0 32\"\n}\n";
+    MapBuildOptions opts;
+    opts.bake = true;
+    return BuildMap(ParseMapText(text), opts);
+  };
+  auto total = [](const Level &level) {
+    long sum = 0;
+    for (size_t i = 0; i < level.lightmap.layers[0].size(); i += 4)
+      sum += level.lightmap.layers[0][i];
+    return sum;
+  };
+  REQUIRE(total(room(true)) > total(room(false)) * 11 / 10);
 }

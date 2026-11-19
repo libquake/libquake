@@ -27,6 +27,8 @@ namespace quakelib {
     bool convertToOpenGL = false;
     /// texture size in pixels by name, {0, 0} or no function leaves the texture uvs at 0
     std::function<std::pair<int, int>(const std::string &textureName)> textureSize;
+    /// average color of a texture (0..1), what bounced light takes on with _bouncecolorscale; gray without
+    std::function<Vec3(const std::string &textureName)> textureColor;
     /// surface types by texture name without path (case insensitive), on top of DefaultSurfaceType
     std::map<std::string, SurfaceType> faceTypes;
     LightmapUVOptions lightmapUV;

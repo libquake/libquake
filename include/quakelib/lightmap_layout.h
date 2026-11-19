@@ -48,6 +48,9 @@ namespace quakelib {
     int atlasX = 0; ///< position of the first luxel in the atlas
     int atlasY = 0;
     std::vector<Vec3> triangles; ///< world positions, 3 per triangle
+    /// one per triangle, the average color of its texture (0..1) for bounced light, empty without
+    /// LightmapLayoutOptions::textureColor
+    std::vector<Vec3> colors;
 
     /// World position of a luxel center, i and j are relative to the chart.
     Vec3 LuxelPosition(float i, float j, float luxelSize) const {
@@ -71,6 +74,8 @@ namespace quakelib {
     int padding = 1;         ///< empty texels between charts
     /// Faces of these textures get no lightmap space. Default: sky and liquids, which Quake draws unlit.
     std::function<bool(const std::string &textureName)> isUnlit;
+    /// average color of a texture (0..1), fills LightmapChart::colors
+    std::function<Vec3(const std::string &textureName)> textureColor;
   };
 
   /**

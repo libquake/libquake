@@ -61,6 +61,7 @@ independent share of the light fades out towards the shadow line instead of drop
 | `std::vector<Vec3> normals` | | 3 per triangle, interpolated across it |
 | `std::vector<Vec2> uvs` | | 3 per triangle, in texels: texel (i, j) covers [i, i + 1) × [j, j + 1) |
 | `int padding` | 1 | texels filled around the triangles |
+| `std::vector<Vec3> colors` | | one per triangle, average texture color for bounced light, may be empty (gray) |
 
 | `BakeLight` | Default | |
 |---|---|---|
@@ -84,16 +85,28 @@ independent share of the light fades out towards the shadow line instead of drop
 | `Vec3 minLightColor` | `{1, 1, 1}` | |
 | `Vec3 ambient` | `{0, 0, 0}` | added to the static light before `minLight`, in lightmap units (128 is normal) |
 | `float surfaceOffset` | 1 | distance of the samples from the surface |
+| `int bounces` | 0 | `_bounce`, times light bounces off surfaces |
+| `float bounceScale` | 1 | `_bouncescale` |
+| `float bounceColorScale` | 0 | `_bouncecolorscale`, 0 bounces gray, 1 the textures' color |
+| `bool bounceStyled` | `false` | `_bouncestyled`, animated and switchable styles bounce too |
 | `int threads` | 0 | 0 uses all hardware threads |
 | `BakeQuality quality` | | never read from a map |
 
 | `BakeQuality` | Default | |
 |---|---|---|
 | `int skySamples` | 64 | suns per sky dome, rounded to its rings (ericw's `-sunsamples`) |
+| `int bounces` | -1 | replaces the map's `bounces`, -1 keeps them; 1 gives old maps bounced light |
+| `float bounceSubdivision` | 64 | map units per patch that bounces light, larger bake faster |
 
 A `SkyDome` is light from the whole sky, `_sunlight2` (from above) and `_sunlight3` (from below) in the ericw
 tools: suns on rings over a half sphere around `direction`, together as bright as `intensity`. Like a sun it
 only reaches surfaces that see the sky.
+
+Bounced light follows the ericw tools too: the light on a patch of `bounceSubdivision` units, times its
+reflectance and area, reaches other patches with cos · cos / max(distance, 128)², scaled by `bounceScale` / 2.
+The reflectance is gray (127 / 255) mixed with the average texture color by `bounceColorScale`. Patches
+receive the bounced light and spread it over their luxels, so it costs far fewer rays than direct light.
+Far away patches facing the same way send together, as one.
 
 | `BakeOccluders` | |
 |---|---|
@@ -143,6 +156,7 @@ charts are split. The result is deterministic.
 | `int width`, `height` | in luxels |
 | `int atlasX`, `atlasY` | position in the atlas |
 | `std::vector<Vec3> triangles` | world positions |
+| `std::vector<Vec3> colors` | one per triangle, average texture color for bounced light, empty without `textureColor` |
 | `Vec3 LuxelPosition(float i, float j, float luxelSize) const` | world position of a luxel |
 
 | `LightmapLayoutOptions` | Default | |
@@ -150,6 +164,7 @@ charts are split. The result is deterministic.
 | `float luxelSize` | 16 | |
 | `int padding` | 1 | |
 | `std::function<bool(const std::string &)> isUnlit` | sky and liquids | textures without lightmap space |
+| `std::function<Vec3(const std::string &)> textureColor` | none | average texture color (0..1), fills `LightmapChart::colors` |
 
 `std::vector<unsigned char> LightmapLayoutDebugImage(const LightmapLayout &)` draws every chart in its own
 color with a luxel checker pattern. `bool IsQuakeUnlitTexture(const std::string &)` is the default

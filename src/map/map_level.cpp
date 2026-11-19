@@ -231,6 +231,7 @@ namespace quakelib {
       LightmapLayoutOptions layoutOpts;
       layoutOpts.luxelSize = options.lightmapUV.luxelSize;
       layoutOpts.padding = (int)options.lightmapUV.padding;
+      layoutOpts.textureColor = options.textureColor;
       LightmapLayout layout = BuildLightmapLayout(all, layoutOpts);
 
       if (options.bake) {

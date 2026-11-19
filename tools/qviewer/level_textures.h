@@ -25,6 +25,9 @@ public:
   /// size of a wad texture, {0, 0} if unknown
   std::pair<int, int> Size(const std::string &name);
 
+  /// average color of a wad texture (0..1), what bounced light takes on; gray if unknown
+  quakelib::Vec3 AverageColor(const std::string &name);
+
   void Build(const quakelib::Level &level, const SurfaceShaders &shaders, Texture2D lightmap);
   void SetShaders(const SurfaceShaders &shaders);
   void SetPointFiltering(bool point);

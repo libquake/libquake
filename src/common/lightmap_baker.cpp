@@ -1,19 +1,22 @@
 #include <quakelib/lightmap_baker.h>
 
+#include "bake_bounce.h"
 #include "bake_bvh.h"
+#include "parallel.h"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <map>
 #include <sstream>
-#include <thread>
 
 namespace quakelib {
   namespace {
+    using detail::BounceLight;
+    using detail::BouncePatch;
     using detail::Bvh;
     using detail::MakeRay;
+    using detail::ParallelFor;
     using detail::Ray;
 
     // ---------------------------------------------------------------------------------------------------
@@ -187,6 +190,11 @@ namespace quakelib {
           v[a] = std::max(v[a], ml[a]);
     }
 
+    float maxComponent(const Vec3 &v) { return std::max({v[0], v[1], v[2]}); }
+
+    // the map's bounces unless the quality settings say otherwise
+    int bounceCount(const BakeOptions &opt) { return opt.quality.bounces >= 0 ? opt.quality.bounces : opt.bounces; }
+
     // ---------------------------------------------------------------------------------------------------
     // chart sampling
 
@@ -212,7 +220,19 @@ namespace quakelib {
 
     struct ChartResult {
       std::vector<int> styles;
-      std::vector<std::vector<Vec3>> values; // per style, width * height
+      std::vector<std::vector<Vec3>> values; // per style, width * height, before _range
+      // for bounced light, per luxel: inside the chart's triangles, the triangle it samples
+      std::vector<uint8_t> inside;
+      std::vector<uint32_t> triangle;
+
+      std::vector<Vec3> &Style(int style, size_t size) {
+        for (size_t i = 0; i < styles.size(); i++)
+          if (styles[i] == style)
+            return values[i];
+        styles.push_back(style);
+        values.emplace_back(size, Vec3{0, 0, 0});
+        return values.back();
+      }
     };
 
     ChartResult bakeChart(const LightmapChart &chart, float L, const Bvh &bvh, const BakeOccluders &occ,
@@ -261,15 +281,12 @@ namespace quakelib {
         active.push_back(li);
       }
 
-      auto styleSlot = [&](int style) -> std::vector<Vec3> & {
-        for (size_t i = 0; i < res.styles.size(); i++)
-          if (res.styles[i] == style)
-            return res.values[i];
-        res.styles.push_back(style);
-        res.values.emplace_back((size_t)w * h, Vec3{0, 0, 0});
-        return res.values.back();
-      };
-      styleSlot(0);
+      const size_t size = (size_t)w * h;
+      res.Style(0, size);
+      if (bounceCount(opt) > 0) {
+        res.inside.assign(size, 0);
+        res.triangle.assign(size, 0);
+      }
 
       const float pushInside = 1.0f / L; // one map unit, in luxels
       for (int j = 0; j < h; j++) {
@@ -277,15 +294,18 @@ namespace quakelib {
           // move luxels outside the polygon onto it, a bit inside, so they do not sample behind walls
           Vec2 q{(float)i, (float)j};
           bool inside = false;
-          for (const auto &t : tris)
-            if (insideTri(q, t)) {
+          uint32_t triangle = 0;
+          for (uint32_t ti = 0; ti < tris.size(); ti++)
+            if (insideTri(q, tris[ti])) {
               inside = true;
+              triangle = ti;
               break;
             }
           if (!inside) {
             float best = 1e30f;
             Vec2 bestP = q;
-            for (const auto &t : tris) {
+            for (uint32_t ti = 0; ti < tris.size(); ti++) {
+              const auto &t = tris[ti];
               const Vec2 *e[3][2] = {{&t.a, &t.b}, {&t.b, &t.c}, {&t.c, &t.a}};
               Vec2 center = (t.a + t.b + t.c) / 3.0f;
               for (auto &edge : e) {
@@ -294,6 +314,7 @@ namespace quakelib {
                 float d = math::Dot(dd, dd);
                 if (d < best) {
                   best = d;
+                  triangle = ti;
                   Vec2 toCenter = center - c;
                   float len = math::Len(toCenter);
                   bestP = len > pushInside ? c + toCenter * (pushInside / len) : center;
@@ -305,19 +326,157 @@ namespace quakelib {
 
           Vec3 pos = chart.LuxelPosition(q[0], q[1], L) + chart.normal * opt.surfaceOffset;
           size_t o = (size_t)j * w + i;
+          if (!res.inside.empty()) {
+            res.inside[o] = inside;
+            res.triangle[o] = triangle;
+          }
 
           for (int li : active) {
             Vec3 value;
             if (lightAt(lights[li], pos, chart.normal, false, bvh, occ, opt, value))
-              styleSlot(lights[li].style)[o] += value;
+              res.Style(lights[li].style, size)[o] += value;
           }
         }
       }
-
-      for (auto &layer : res.values)
-        applyRangeScale(layer, opt);
-      applyAmbientAndMinLight(styleSlot(0), opt);
       return res;
+    }
+
+    // what a surface reflects: gray mixed with its texture's color as much as _bouncecolorscale says
+    Vec3 reflectance(const std::vector<Vec3> &colors, uint32_t triangle, const BakeOptions &opt) {
+      constexpr float GRAY = 127.0f / 255.0f;
+      Vec3 color = triangle < colors.size() ? colors[triangle] : Vec3{GRAY, GRAY, GRAY};
+      return Vec3{GRAY, GRAY, GRAY} + (color - Vec3{GRAY, GRAY, GRAY}) * opt.bounceColorScale;
+    }
+
+    /// Bounced light for planar charts: blocks of luxels in each chart are the patches, the light they
+    /// receive is spread back over the luxels bilinearly between the blocks of the same chart.
+    void bounceCharts(const LightmapLayout &layout, std::vector<ChartResult> &results, const Bvh &bvh,
+                      const BakeOptions &opt) {
+      const float L = layout.luxelSize;
+      const int block = std::max(1, (int)std::lround(opt.quality.bounceSubdivision / L));
+
+      std::vector<BouncePatch> patches;
+      std::vector<uint32_t> patchChart;
+      std::vector<std::vector<uint32_t>> members; // luxels of each patch
+      std::vector<std::vector<int>> blockPatch(layout.charts.size()); // per chart and block, -1 for none
+      for (size_t c = 0; c < layout.charts.size(); c++) {
+        const auto &chart = layout.charts[c];
+        const auto &res = results[c];
+        const int cols = (chart.width + block - 1) / block, rows = (chart.height + block - 1) / block;
+        blockPatch[c].assign((size_t)cols * rows, -1);
+        // charts too thin for any luxel inside take all of them
+        const bool anyInside = std::find(res.inside.begin(), res.inside.end(), 1) != res.inside.end();
+        for (int by = 0; by < rows; by++)
+          for (int bx = 0; bx < cols; bx++) {
+            std::vector<uint32_t> luxels;
+            Vec2 center{0, 0};
+            for (int j = by * block; j < std::min(chart.height, (by + 1) * block); j++)
+              for (int i = bx * block; i < std::min(chart.width, (bx + 1) * block); i++) {
+                uint32_t o = (uint32_t)(j * chart.width + i);
+                if (anyInside && !res.inside[o])
+                  continue;
+
+                luxels.push_back(o);
+                center += Vec2{(float)i, (float)j};
+              }
+            if (luxels.empty())
+              continue;
+
+            // the patch sits at its luxel closest to the middle, a middle outside the surface could be in a wall
+            center = center / (float)luxels.size();
+            uint32_t at = luxels[0];
+            float nearest = 1e30f;
+            BouncePatch patch;
+            patch.reflectance = {0, 0, 0};
+            for (uint32_t o : luxels) {
+              Vec2 d = Vec2{(float)(o % chart.width), (float)(o / chart.width)} - center;
+              if (math::Dot(d, d) < nearest) {
+                nearest = math::Dot(d, d);
+                at = o;
+              }
+              patch.reflectance += reflectance(chart.colors, res.triangle[o], opt);
+            }
+            patch.reflectance = patch.reflectance / (float)luxels.size();
+            patch.position = chart.LuxelPosition((float)(at % chart.width), (float)(at / chart.width), L);
+            patch.normal = chart.normal;
+            patch.area = (float)luxels.size() * L * L;
+            blockPatch[c][(size_t)by * cols + bx] = (int)patches.size();
+            patches.push_back(patch);
+            patchChart.push_back((uint32_t)c);
+            members.push_back(std::move(luxels));
+          }
+      }
+      if (patches.empty())
+        return;
+
+      std::vector<int> styles{0};
+      if (opt.bounceStyled)
+        for (const auto &res : results)
+          for (int s : res.styles)
+            if (std::find(styles.begin(), styles.end(), s) == styles.end())
+              styles.push_back(s);
+
+      for (int style : styles) {
+        std::vector<Vec3> light(patches.size(), Vec3{0, 0, 0});
+        for (size_t p = 0; p < patches.size(); p++) {
+          auto &res = results[patchChart[p]];
+          auto it = std::find(res.styles.begin(), res.styles.end(), style);
+          if (it == res.styles.end())
+            continue;
+
+          const auto &values = res.values[it - res.styles.begin()];
+          for (uint32_t o : members[p])
+            light[p] += values[o];
+          light[p] = light[p] / (float)members[p].size();
+        }
+
+        auto bounced = BounceLight(patches, light, bvh, bounceCount(opt), opt.bounceScale, opt.surfaceOffset,
+                                   opt.threads);
+
+        ParallelFor(layout.charts.size(), opt.threads, [&](size_t c) {
+          const auto &chart = layout.charts[c];
+          const auto &ids = blockPatch[c];
+          const int cols = (chart.width + block - 1) / block, rows = (chart.height + block - 1) / block;
+          auto patchAt = [&](int bx, int by) {
+            return bx < 0 || by < 0 || bx >= cols || by >= rows ? -1 : ids[(size_t)by * cols + bx];
+          };
+          bool any = false;
+          for (int id : ids)
+            any |= id >= 0 && maxComponent(bounced[id]) > 0;
+          if (!any)
+            return;
+
+          auto &values = results[c].Style(style, (size_t)chart.width * chart.height);
+          for (int j = 0; j < chart.height; j++)
+            for (int i = 0; i < chart.width; i++) {
+              // bilinear between the four nearest block centers, blocks without a patch left out
+              float fx = (i + 0.5f) / block - 0.5f, fy = (j + 0.5f) / block - 0.5f;
+              int x0 = (int)std::floor(fx), y0 = (int)std::floor(fy);
+              float tx = fx - x0, ty = fy - y0;
+              Vec3 sum{0, 0, 0};
+              float weights = 0;
+              for (int dy = 0; dy < 2; dy++)
+                for (int dx = 0; dx < 2; dx++) {
+                  int id = patchAt(x0 + dx, y0 + dy);
+                  if (id < 0)
+                    continue;
+
+                  float wgt = (dx ? tx : 1 - tx) * (dy ? ty : 1 - ty);
+                  sum += bounced[id] * wgt;
+                  weights += wgt;
+                }
+              if (weights <= 0) {
+                int id = patchAt(i / block, j / block);
+                if (id < 0)
+                  continue;
+
+                sum = bounced[id];
+                weights = 1;
+              }
+              values[(size_t)j * chart.width + i] += sum / weights;
+            }
+        });
+      }
     }
 
     uint8_t toByte(float v) { return (uint8_t)std::clamp((int)std::lround(v), 0, 255); }
@@ -357,21 +516,6 @@ namespace quakelib {
       }
     }
 
-    template <typename Work> void parallelFor(size_t count, int threads, Work work) {
-      std::atomic<size_t> next{0};
-      int n = threads > 0 ? threads : (int)std::max(1u, std::thread::hardware_concurrency());
-      auto worker = [&]() {
-        for (size_t i; (i = next.fetch_add(1)) < count;)
-          work(i);
-      };
-      std::vector<std::thread> pool;
-      for (int t = 1; t < n; t++)
-        pool.emplace_back(worker);
-      worker();
-      for (auto &t : pool)
-        t.join();
-    }
-
     // ---------------------------------------------------------------------------------------------------
     // surface sampling: triangles of any shape, found per texel by rasterizing them in uv space
 
@@ -401,7 +545,7 @@ namespace quakelib {
                                                          const std::vector<BakeLight> &lights,
                                                          const std::vector<float> &ranges, int threads) {
       std::vector<std::vector<uint32_t>> result(s.positions.size() / 3);
-      parallelFor(result.size(), threads, [&](size_t t) {
+      ParallelFor(result.size(), threads, [&](size_t t) {
         const Vec3 &a = s.positions[t * 3], &b = s.positions[t * 3 + 1], &c = s.positions[t * 3 + 2];
         Vec3 center = (a + b + c) / 3.0f;
         float radius = std::max({math::Len(a - center), math::Len(b - center), math::Len(c - center)});
@@ -465,6 +609,151 @@ namespace quakelib {
       return samples;
     }
 
+    /// Bounced light for surfaces of any shape. The patches are blocks of the atlas, split by the direction and
+    /// place of the surface under each texel; the light they receive goes back to the texels near them that
+    /// face the same way, so it does not bleed between neighbours in the atlas.
+    void bounceSurfaces(const BakeSurfaces &s, const std::vector<TexelSample> &samples,
+                        std::vector<std::vector<Vec3>> &values, const Bvh &bvh, const BakeOptions &opt) {
+      constexpr float SAME_DIRECTION = 0.9f;
+
+      // map units per texel over all triangles, and the area each texel of a triangle covers
+      double worldArea = 0, uvArea = 0;
+      std::vector<float> texelArea(s.positions.size() / 3, 0.0f);
+      for (size_t t = 0; t + 2 < s.positions.size() && t + 2 < s.uvs.size(); t += 3) {
+        float world =
+            0.5f * math::Len(math::Cross(s.positions[t + 1] - s.positions[t], s.positions[t + 2] - s.positions[t]));
+        Vec2 a = s.uvs[t + 1] - s.uvs[t], b = s.uvs[t + 2] - s.uvs[t];
+        float uv = 0.5f * std::abs(a[0] * b[1] - a[1] * b[0]);
+        texelArea[t / 3] = uv > 1e-9f ? world / uv : 0.0f;
+        worldArea += world;
+        uvArea += uv;
+      }
+      if (uvArea <= 0)
+        return;
+
+      const float texel = (float)std::sqrt(worldArea / uvArea);
+      const int block = std::max(1, (int)std::lround(opt.quality.bounceSubdivision / texel));
+      const float reach = 2.0f * block * texel;
+      const int cols = (s.width + block - 1) / block, rows = (s.height + block - 1) / block;
+      auto covered = [&](size_t o) { return samples[o].distance <= COVER_DISTANCE; };
+
+      std::vector<BouncePatch> patches;
+      std::vector<Vec2> patchTexel; // middle of each patch in the atlas
+      std::vector<std::vector<uint32_t>> members;
+      std::vector<int> patchOf(samples.size(), -1);
+      std::vector<std::pair<int, int>> blockPatches((size_t)cols * rows, {0, 0}); // first patch, end
+      for (int by = 0; by < rows; by++)
+        for (int bx = 0; bx < cols; bx++) {
+          struct Group {
+            Vec3 normal, point;
+            std::vector<uint32_t> texels;
+          };
+          std::vector<Group> groups;
+          for (int y = by * block; y < std::min(s.height, (by + 1) * block); y++)
+            for (int x = bx * block; x < std::min(s.width, (bx + 1) * block); x++) {
+              uint32_t o = (uint32_t)(y * s.width + x);
+              if (!covered(o))
+                continue;
+
+              const auto &t = samples[o];
+              Group *in = nullptr;
+              for (auto &g : groups)
+                if (math::Dot(t.normal, g.normal) > SAME_DIRECTION &&
+                    std::abs(math::Dot(g.normal, t.surface - g.point)) < texel &&
+                    math::Len(t.surface - g.point) < reach) {
+                  in = &g;
+                  break;
+                }
+              if (!in) {
+                groups.push_back({t.normal, t.surface, {}});
+                in = &groups.back();
+              }
+              in->texels.push_back(o);
+            }
+
+          blockPatches[(size_t)by * cols + bx].first = (int)patches.size();
+          for (auto &g : groups) {
+            Vec3 center{0, 0, 0}, normal{0, 0, 0};
+            Vec2 middle{0, 0};
+            BouncePatch patch;
+            patch.reflectance = {0, 0, 0};
+            for (uint32_t o : g.texels) {
+              const auto &t = samples[o];
+              center += t.surface;
+              normal += t.normal;
+              middle += Vec2{(float)(o % s.width) + 0.5f, (float)(o / s.width) + 0.5f};
+              patch.reflectance += reflectance(s.colors, t.triangle, opt);
+              patch.area += texelArea[t.triangle];
+            }
+            const float n = (float)g.texels.size();
+            center = center / n;
+            uint32_t at = g.texels[0];
+            float nearest = 1e30f;
+            for (uint32_t o : g.texels) {
+              float d = math::Len(samples[o].surface - center);
+              if (d < nearest) {
+                nearest = d;
+                at = o;
+              }
+            }
+            patch.position = samples[at].surface;
+            patch.normal = math::Len(normal) > 1e-6f ? math::Norm(normal) : samples[at].normal;
+            patch.reflectance = patch.reflectance / n;
+            for (uint32_t o : g.texels)
+              patchOf[o] = (int)patches.size();
+            patches.push_back(patch);
+            patchTexel.push_back(middle / n);
+            members.push_back(std::move(g.texels));
+          }
+          blockPatches[(size_t)by * cols + bx].second = (int)patches.size();
+        }
+      if (patches.empty())
+        return;
+
+      // values[0] is style 0, the others bounce with _bouncestyled only
+      const size_t layers = opt.bounceStyled ? values.size() : 1;
+      for (size_t layer = 0; layer < layers; layer++) {
+        std::vector<Vec3> light(patches.size(), Vec3{0, 0, 0});
+        for (size_t p = 0; p < patches.size(); p++) {
+          for (uint32_t o : members[p])
+            light[p] += values[layer][o];
+          light[p] = light[p] / (float)members[p].size();
+        }
+
+        auto bounced = BounceLight(patches, light, bvh, bounceCount(opt), opt.bounceScale, opt.surfaceOffset,
+                                   opt.threads);
+
+        ParallelFor((size_t)s.height, opt.threads, [&](size_t y) {
+          for (int x = 0; x < s.width; x++) {
+            size_t o = y * s.width + x;
+            if (patchOf[o] < 0)
+              continue;
+
+            const auto &t = samples[o];
+            const Vec2 at{x + 0.5f, y + 0.5f};
+            const int bx = x / block, by = (int)y / block;
+            Vec3 sum{0, 0, 0};
+            float weights = 0;
+            for (int ny = std::max(0, by - 1); ny <= std::min(rows - 1, by + 1); ny++)
+              for (int nx = std::max(0, bx - 1); nx <= std::min(cols - 1, bx + 1); nx++) {
+                auto [first, end] = blockPatches[(size_t)ny * cols + nx];
+                for (int p = first; p < end; p++) {
+                  float wx = 1.0f - std::abs(at[0] - patchTexel[p][0]) / block;
+                  float wy = 1.0f - std::abs(at[1] - patchTexel[p][1]) / block;
+                  if (wx <= 0 || wy <= 0 || math::Dot(t.normal, patches[p].normal) <= SAME_DIRECTION ||
+                      math::Len(t.surface - patches[p].position) > reach)
+                    continue;
+
+                  sum += bounced[p] * (wx * wy);
+                  weights += wx * wy;
+                }
+              }
+            values[layer][o] += weights > 0 ? sum / weights : bounced[patchOf[o]];
+          }
+        });
+      }
+    }
+
     std::vector<float> floats(const std::string &s) {
       std::vector<float> out;
       std::stringstream ss(s);
@@ -508,8 +797,15 @@ namespace quakelib {
     Bvh bvh(occluders.triangles);
 
     std::vector<ChartResult> results(layout.charts.size());
-    parallelFor(layout.charts.size(), options.threads, [&](size_t c) {
+    ParallelFor(layout.charts.size(), options.threads, [&](size_t c) {
       results[c] = bakeChart(layout.charts[c], layout.luxelSize, bvh, occluders, ls, ranges, options);
+    });
+    if (bounceCount(options) > 0)
+      bounceCharts(layout, results, bvh, options);
+    ParallelFor(results.size(), options.threads, [&](size_t c) {
+      for (auto &layer : results[c].values)
+        applyRangeScale(layer, options);
+      applyAmbientAndMinLight(results[c].values[0], options);
     });
 
     // layers in style order, 0 first
@@ -588,7 +884,7 @@ namespace quakelib {
     Bvh bvh(occluders.triangles);
     auto candidates = lightsPerTriangle(surfaces, ls, ranges, options.threads);
 
-    parallelFor((size_t)out.height, options.threads, [&](size_t y) {
+    ParallelFor((size_t)out.height, options.threads, [&](size_t y) {
       for (int x = 0; x < out.width; x++) {
         size_t o = y * out.width + x;
         const auto &sample = samples[o];
@@ -608,6 +904,9 @@ namespace quakelib {
         }
       }
     });
+
+    if (bounceCount(options) > 0)
+      bounceSurfaces(surfaces, samples, values, bvh, options);
 
     std::vector<uint8_t> covered(texels, 0);
     for (size_t o = 0; o < texels; o++)
@@ -707,6 +1006,11 @@ namespace quakelib {
                                                         : worldspawn->Get("_anglesense");
       if (!as.empty())
         opts.angleScale = std::clamp((float)std::atof(as.c_str()), 0.0f, 1.0f);
+      opts.bounces = std::max(0, std::atoi(worldspawn->Get("_bounce").c_str()));
+      if (!worldspawn->Get("_bouncescale").empty())
+        opts.bounceScale = std::max(0.0f, (float)std::atof(worldspawn->Get("_bouncescale").c_str()));
+      opts.bounceColorScale = std::clamp((float)std::atof(worldspawn->Get("_bouncecolorscale").c_str()), 0.0f, 1.0f);
+      opts.bounceStyled = std::atoi(worldspawn->Get("_bouncestyled").c_str()) != 0;
       auto range = worldspawn->Get("_range");
       if (!range.empty() && std::atof(range.c_str()) > 0)
         opts.rangeScale = (float)std::atof(range.c_str());

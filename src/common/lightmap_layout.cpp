@@ -176,6 +176,14 @@ namespace quakelib {
     layout.padding = std::max(0, opts.padding);
     const float L = opts.luxelSize;
     auto isUnlit = opts.isUnlit ? opts.isUnlit : IsQuakeUnlitTexture;
+    // one lookup per texture, the callback may average all its pixels
+    std::map<std::string, Vec3> colorCache;
+    auto colorOf = [&](const std::string &name) {
+      auto it = colorCache.find(name);
+      if (it == colorCache.end())
+        it = colorCache.emplace(name, opts.textureColor(name)).first;
+      return it->second;
+    };
 
     // gather the triangles that get lightmap space
     std::vector<Tri> tris;
@@ -237,6 +245,8 @@ namespace quakelib {
       double smin = 1e30, smax = -1e30, tmin = 1e30, tmax = -1e30;
       std::vector<std::array<PosKey, 3>> keyTris;
       for (int ti : list) {
+        if (opts.textureColor)
+          chart.colors.push_back(colorOf(meshes[tris[ti].mesh]->textureName));
         std::array<PosKey, 3> kt;
         for (int k = 0; k < 3; k++) {
           const auto &p = tris[ti].p[k];

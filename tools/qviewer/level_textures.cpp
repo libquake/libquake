@@ -59,6 +59,28 @@ std::pair<int, int> LevelTextures::Size(const std::string &name) {
   return {0, 0};
 }
 
+quakelib::Vec3 LevelTextures::AverageColor(const std::string &name) {
+  auto *qt = wads.FindTexture(name);
+  if (!qt)
+    return {0.5f, 0.5f, 0.5f};
+
+  // transparent pixels of '{' textures left out
+  double sum[3] = {0, 0, 0};
+  size_t n = 0;
+  for (const auto &c : qt->raw) {
+    if (c.rgba[3] == 0)
+      continue;
+
+    for (int k = 0; k < 3; k++)
+      sum[k] += c.rgba[k];
+    n++;
+  }
+  if (n == 0)
+    return {0.5f, 0.5f, 0.5f};
+
+  return {(float)(sum[0] / n / 255), (float)(sum[1] / n / 255), (float)(sum[2] / n / 255)};
+}
+
 bool LevelTextures::fromLevel(const quakelib::TextureInfo &info, Images &out) {
   if (info.rgba.empty())
     return false;

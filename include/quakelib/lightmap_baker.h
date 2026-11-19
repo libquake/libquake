@@ -52,6 +52,10 @@ namespace quakelib {
   struct BakeQuality {
     /// suns per sky dome, rounded to the dome's rings (ericw's -sunsamples)
     int skySamples = 64;
+    /// times light bounces, -1 as the map says (BakeOptions::bounces); 1 gives old maps bounced light too
+    int bounces = -1;
+    /// size of the patches that bounce light, in map units (ericw's _bouncelightsubdivision)
+    float bounceSubdivision = 64.0f;
   };
 
   struct BakeOptions {
@@ -66,6 +70,14 @@ namespace quakelib {
     Vec3 ambient{0, 0, 0};
     /// distance of the sample points from their surface, keeps them out of the surface itself
     float surfaceOffset = 1.0f;
+    /// times light bounces off surfaces, 0 is direct light only (worldspawn "_bounce")
+    int bounces = 0;
+    /// brightness of the bounced light (worldspawn "_bouncescale")
+    float bounceScale = 1.0f;
+    /// 0 bounces gray, 1 the average color of the textures (worldspawn "_bouncecolorscale")
+    float bounceColorScale = 0.0f;
+    /// animated and switchable styles bounce too, otherwise only static light (worldspawn "_bouncestyled")
+    bool bounceStyled = false;
     /// 0 uses all hardware threads
     int threads = 0;
     BakeQuality quality;
@@ -100,6 +112,8 @@ namespace quakelib {
     std::vector<Vec3> positions; ///< 3 per triangle
     std::vector<Vec3> normals;   ///< 3 per triangle, interpolated across it
     std::vector<Vec2> uvs;       ///< 3 per triangle, in texels: texel (i, j) covers [i, i + 1) x [j, j + 1)
+    /// one per triangle, the average color of its texture (0..1) for bounced light, may be empty (gray)
+    std::vector<Vec3> colors;
     /// texels filled around the triangles, keeps filtering from pulling in black
     int padding = 1;
   };
@@ -116,7 +130,7 @@ namespace quakelib {
    * Supports light / _light, _color, wait, delay, style, targetname (switchable lights get styles from 32
    * up), target / mangle (spot lights) with angle and _softangle, and on the worldspawn light / _minlight,
    * _minlight_color, _anglescale / _anglesense, _range, _sunlight, _sun_mangle, _sunlight_color, _sunlight2,
-   * _sunlight2_color, _sunlight3 and _sunlight3_color.
+   * _sunlight2_color, _sunlight3, _sunlight3_color, _bounce, _bouncescale, _bouncecolorscale and _bouncestyled.
    *
    * The worldspawn is looked up in the list.
    *
