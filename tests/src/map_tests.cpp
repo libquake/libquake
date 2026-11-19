@@ -882,6 +882,20 @@ TEST_CASE("bounced light on small texels next to large ones", "[map/lightmap]") 
   REQUIRE(texel(together, 76, 5) <= 1);
 }
 
+TEST_CASE("surface offset per triangle", "[map/lightmap]") {
+  // a plate half a unit above the floor and a light between them: one unit up, the samples sit above the
+  // plate and in its shadow, as a model's part lying closer than the offset on another would
+  BakeOccluders plate;
+  plate.triangles = {{0, 0, 0.5f}, {256, 0, 0.5f}, {256, 256, 0.5f}, {0, 0, 0.5f}, {256, 256, 0.5f}, {0, 256, 0.5f}};
+  BakeLight light;
+  light.position = {40, 136, 0.25f};
+  REQUIRE(texel(BakeLightmap(floor({0, 0, 1}), plate, {light}), 12, 12) == 0);
+
+  auto close = floor({0, 0, 1});
+  close.surfaceOffsetScales = {0.1f, 0.1f};
+  REQUIRE(texel(BakeLightmap(close, plate, {light}), 12, 12) > 0);
+}
+
 TEST_CASE("bounce keys of the worldspawn", "[map/lightmap]") {
   std::vector<LevelEntity> ents(1);
   ents[0].classname = "worldspawn";

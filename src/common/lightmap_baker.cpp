@@ -518,6 +518,7 @@ namespace quakelib {
             patch.position = chart.LuxelPosition((float)(at % chart.width), (float)(at / chart.width), L);
             patch.normal = chart.normal;
             patch.area = (float)luxels.size() * L * L;
+            patch.offset = opt.surfaceOffset;
             blockPatch[c][(size_t)by * cols + bx] = (int)patches.size();
             patches.push_back(patch);
             patchChart.push_back((uint32_t)c);
@@ -548,8 +549,7 @@ namespace quakelib {
           light[p] = light[p] / (float)members[p].size();
         }
 
-        auto bounced = BounceLight(patches, light, bvh, bounceCount(opt), bounceScale(opt), opt.surfaceOffset,
-                                   opt.threads);
+        auto bounced = BounceLight(patches, light, bvh, bounceCount(opt), bounceScale(opt), opt.threads);
 
         ParallelFor(layout.charts.size(), opt.threads, [&](size_t c) {
           const auto &chart = layout.charts[c];
@@ -729,6 +729,10 @@ namespace quakelib {
       return samples;
     }
 
+    float offsetScale(const BakeSurfaces &s, uint32_t triangle) {
+      return triangle < s.surfaceOffsetScales.size() ? s.surfaceOffsetScales[triangle] : 1.0f;
+    }
+
     /// Position and normal of triangle t at atlas position p, moved onto the triangle when p is off it.
     void pointOn(const BakeSurfaces &s, uint32_t t, const Vec2 &p, Vec3 &position, Vec3 &normal) {
       const size_t k = (size_t)t * 3;
@@ -848,6 +852,7 @@ namespace quakelib {
             }
             patch.position = samples[at].surface;
             patch.normal = math::Len(normal) > 1e-6f ? math::Norm(normal) : samples[at].normal;
+            patch.offset = opt.surfaceOffset * offsetScale(s, samples[at].triangle);
             patch.reflectance = patch.reflectance / n;
             for (uint32_t o : g.texels)
               patchOf[o] = (int)patches.size();
@@ -870,8 +875,7 @@ namespace quakelib {
           light[p] = light[p] / (float)members[p].size();
         }
 
-        auto bounced = BounceLight(patches, light, bvh, bounceCount(opt), bounceScale(opt), opt.surfaceOffset,
-                                   opt.threads);
+        auto bounced = BounceLight(patches, light, bvh, bounceCount(opt), bounceScale(opt), opt.threads);
 
         ParallelFor((size_t)s.height, opt.threads, [&](size_t y) {
           for (int x = 0; x < s.width; x++) {
@@ -1054,7 +1058,7 @@ namespace quakelib {
             Vec3 surface = sample.surface, normal = sample.normal;
             if (n > 1)
               pointOn(surfaces, sample.triangle, Vec2{x + (sx + 0.5f) / n, y + (sy + 0.5f) / n}, surface, normal);
-            Vec3 pos = surface + normal * options.surfaceOffset;
+            Vec3 pos = surface + normal * (options.surfaceOffset * offsetScale(surfaces, sample.triangle));
             const auto &scales = surfaces.dirtDepthScales;
             float depthScale = sample.triangle < scales.size() ? scales[sample.triangle] : 1.0f;
             float occluded = dirt.Used() ? dirt.Occlusion(pos, normal, bvh, occluders, depthScale) : 0.0f;

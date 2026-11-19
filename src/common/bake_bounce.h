@@ -14,6 +14,7 @@ namespace quakelib::detail {
     Vec3 normal;
     Vec3 reflectance; ///< 0..1
     float area = 0;   ///< map units²
+    float offset = 1; ///< distance of the ray ends from the surface
   };
 
   /**
@@ -21,10 +22,9 @@ namespace quakelib::detail {
    * reflectance and area, each receiver gets cos * cos / max(distance, 128)² of it, scaled by `scale` / 2.
    *
    * @param light the light arriving at each patch, in lightmap units before _range
-   * @param offset distance of the ray ends from the surfaces
    * @return the bounced light arriving at each patch, all bounces added up
    */
   std::vector<Vec3> BounceLight(const std::vector<BouncePatch> &patches, const std::vector<Vec3> &light,
-                                const Bvh &bvh, int bounces, float scale, float offset, int threads);
+                                const Bvh &bvh, int bounces, float scale, int threads);
 
 } // namespace quakelib::detail

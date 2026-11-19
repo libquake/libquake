@@ -144,6 +144,9 @@ namespace quakelib {
     /// one per triangle, scales BakeOptions::dirtDepth there, may be empty (1). A map's dirt depth fits its
     /// architecture, small models next to it look better with less.
     std::vector<float> dirtDepthScales;
+    /// one per triangle, scales BakeOptions::surfaceOffset there, may be empty (1). Parts of a detailed model
+    /// that lie closer on each other than the offset shadow each other where they should not.
+    std::vector<float> surfaceOffsetScales;
     /// texels filled around the triangles, keeps filtering from pulling in black
     int padding = 1;
   };

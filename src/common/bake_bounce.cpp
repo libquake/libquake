@@ -67,6 +67,7 @@ namespace quakelib::detail {
       Vec3 position; ///< on a surface
       Vec3 normal;
       Vec3 power;
+      float offset;
     };
 
     struct Cluster {
@@ -98,7 +99,7 @@ namespace quakelib::detail {
         uint64_t key = keyOf(cellOf(patches[i].position, size)) * 8 + directionOf(patches[i].normal);
         auto [it, added] = index.try_emplace(key, (uint32_t)out.size());
         if (added) {
-          out.push_back({{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}, {0, 0, 0}, {}});
+          out.push_back({{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, 0}, {0, 0, 0}, {}});
           weights.push_back(0);
         }
         auto &c = out[it->second];
@@ -119,6 +120,7 @@ namespace quakelib::detail {
           if (d < nearest) {
             nearest = d;
             cluster.sender.position = patches[i].position;
+            cluster.sender.offset = patches[i].offset;
           }
         }
       }
@@ -127,7 +129,7 @@ namespace quakelib::detail {
   } // namespace
 
   std::vector<Vec3> BounceLight(const std::vector<BouncePatch> &patches, const std::vector<Vec3> &light,
-                                const Bvh &bvh, int bounces, float scale, float offset, int threads) {
+                                const Bvh &bvh, int bounces, float scale, int threads) {
     const size_t n = patches.size();
     std::vector<Vec3> total(n, Vec3{0, 0, 0});
     std::vector<Vec3> arriving = light;
@@ -168,7 +170,7 @@ namespace quakelib::detail {
       std::vector<Vec3> received(n, Vec3{0, 0, 0});
       ParallelFor(n, threads, [&](size_t r) {
         const auto &receiver = patches[r];
-        const Vec3 from = receiver.position + receiver.normal * offset;
+        const Vec3 from = receiver.position + receiver.normal * receiver.offset;
         Vec3 sum{0, 0, 0};
         auto receive = [&](const Sender &sender) {
           Vec3 d = sender.position - receiver.position;
@@ -187,7 +189,7 @@ namespace quakelib::detail {
           if (maxComponent(add) < GATE)
             return;
 
-          Vec3 to = sender.position + sender.normal * offset;
+          Vec3 to = sender.position + sender.normal * sender.offset;
           Vec3 ray = to - from;
           float length = math::Len(ray);
           if (length > 1e-3f && bvh.Any(MakeRay(from, ray / length), 0.01f, length - 0.01f))
@@ -203,7 +205,7 @@ namespace quakelib::detail {
           }
           for (uint32_t e : cluster.patches)
             if (e != r)
-              receive({patches[e].position, patches[e].normal, power[e]});
+              receive({patches[e].position, patches[e].normal, power[e], patches[e].offset});
         });
         received[r] = sum;
       });
