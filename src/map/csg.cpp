@@ -263,8 +263,12 @@ namespace quakelib::map {
       for (auto &face : brush.m_faces) {
         const auto &verts = face->m_vertices;
         size_t n = verts.size();
-        if (n <= 3) {
-          newFaces.push_back(face);
+        // the collinear cleanup can leave a face with three corners or fewer, its indices still count more
+        if (n < 3)
+          continue;
+
+        if (n == 3) {
+          emitTriangle(face, verts[0], verts[1], verts[2], newFaces);
           continue;
         }
 

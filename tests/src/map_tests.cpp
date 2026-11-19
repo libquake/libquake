@@ -928,6 +928,27 @@ TEST_CASE("a skip face still bounds its brush", "[map/csg]") {
   REQUIRE(boxTop);
 }
 
+TEST_CASE("a sliver face that collapses leaves no triangles", "[map/csg]") {
+  // a wedge so thin that the collinear cleanup leaves two corners of its top and bottom, as in qbj3_radiatoryang
+  std::string sliver = "{\n"
+                       "( 0 0 0 ) ( 128 128 0 ) ( 0 0 1 ) ground1 0 0 0 1 1\n"
+                       "( 0 0 0 ) ( 0 0 1 ) ( 128 127.879 0 ) ground1 0 0 0 1 1\n"
+                       "( 128 0 0 ) ( 128 0 1 ) ( 128 1 0 ) ground1 0 0 0 1 1\n"
+                       "( 0 0 0 ) ( 1 0 0 ) ( 0 1 0 ) ground1 0 0 0 1 1\n"
+                       "( 0 0 64 ) ( 0 1 64 ) ( 1 0 64 ) ground1 0 0 0 1 1\n"
+                       "}\n";
+  std::string text = "{\n\"classname\" \"worldspawn\"\n" + sliver + "}\n";
+  Level level = BuildMap(ParseMapText(text));
+  for (const auto &geometry : level.geometry)
+    for (const auto &m : geometry.meshes)
+      for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
+        REQUIRE(std::max({m.indices[i], m.indices[i + 1], m.indices[i + 2]}) < m.vertices.size());
+        const Vec3 &a = m.vertices[m.indices[i]].point;
+        REQUIRE(m.vertices[m.indices[i + 1]].point != a);
+        REQUIRE(m.vertices[m.indices[i + 2]].point != a);
+      }
+}
+
 TEST_CASE("brush entity pivots", "[map/level]") {
   std::string text = "{\n\"classname\" \"worldspawn\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") + "}\n";
   text += "{\n\"classname\" \"func_wall\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") + "}\n";
