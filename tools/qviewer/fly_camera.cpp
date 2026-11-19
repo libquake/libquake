@@ -31,6 +31,21 @@ void FlyCamera::Reset(const quakelib::Level &level) {
   camera.target = center;
 }
 
+void FlyCamera::Set(const quakelib::Vec3 &origin, float yaw, float pitch) {
+  float y = yaw * DEG2RAD, p = pitch * DEG2RAD;
+  camera.position = {origin[0], origin[2], -origin[1]};
+  Vector3 forward{std::cos(y) * std::cos(p), std::sin(p), -std::sin(y) * std::cos(p)};
+  camera.target = Vector3Add(camera.position, forward);
+}
+
+std::string FlyCamera::Describe() const {
+  Vector3 f = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+  float yaw = std::atan2(-f.z, f.x) * RAD2DEG;
+  float pitch = std::asin(Clamp(f.y, -1.0f, 1.0f)) * RAD2DEG;
+  return TextFormat("%.0f %.0f %.0f %.1f %.1f", camera.position.x, -camera.position.z, camera.position.y, yaw,
+                    pitch);
+}
+
 void FlyCamera::Update(float dt) {
   if (!IsCursorHidden())
     return;

@@ -22,6 +22,8 @@ public:
   ~Viewer();
 
   bool Load(const std::string &file, const LoadOptions &options);
+  /// replaces the start position, quake coordinates and degrees
+  void SetCamera(const quakelib::Vec3 &origin, float yaw, float pitch) { camera.Set(origin, yaw, pitch); }
   void Run(const ViewSettings &settings, const CaptureOptions &capture = {});
 
 private:

@@ -1,6 +1,7 @@
 #include "viewer.h"
 #include <args/args.hxx>
 #include <iostream>
+#include <sstream>
 
 void banner() {
   std::cout << R"(
@@ -36,6 +37,9 @@ int main(int argc, char *argv[]) {
   args::ValueFlag<int> frames(parser, "count", "frames before the screenshot (default 30)", {"frames"});
   args::ValueFlag<double> styleTime(parser, "seconds", "freeze the light styles at this time",
                                     {"style-time"});
+  args::ValueFlag<std::string> cameraPose(parser, "\"x y z yaw pitch\"",
+                                          "start position in quake coordinates, C prints the current one",
+                                          {"camera"});
 
   try {
     parser.ParseCLI(argc, argv);
@@ -70,6 +74,16 @@ int main(int argc, char *argv[]) {
   Viewer viewer;
   if (!viewer.Load(args::get(map), load))
     return 1;
+
+  if (cameraPose) {
+    float x, y, z, yaw, pitch;
+    std::istringstream ss(args::get(cameraPose));
+    if (!(ss >> x >> y >> z >> yaw >> pitch)) {
+      std::cerr << "--camera expects \"x y z yaw pitch\"" << std::endl;
+      return 1;
+    }
+    viewer.SetCamera({x, y, z}, yaw, pitch);
+  }
   viewer.Run(view, capture);
   return 0;
 }

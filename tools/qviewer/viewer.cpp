@@ -128,6 +128,8 @@ void Viewer::handleKeys() {
     IsCursorHidden() ? EnableCursor() : DisableCursor();
   if (IsKeyPressed(KEY_R))
     camera.Reset(level);
+  if (IsKeyPressed(KEY_C))
+    std::cout << "--camera \"" << camera.Describe() << "\"" << std::endl;
   if (IsKeyPressed(KEY_F5))
     reloadShaders();
 
@@ -154,7 +156,8 @@ void Viewer::handleKeys() {
 void Viewer::drawHud() {
   DrawRectangle(0, 0, GetScreenWidth(), 74, Fade(BLACK, 0.55f));
   DrawFPS(10, 8);
-  DrawText("WASD Space Ctrl: move  Shift: fast  Wheel: speed  M: mouse  R: reset camera  F5: reload shaders",
+  DrawText("WASD Space Ctrl: move  Shift: fast  Wheel: speed  M: mouse  R: reset camera  C: print camera  "
+           "F5: reload shaders",
            110, 8, 18, LIGHTGRAY);
   DrawText("P: pause light styles  T: switchable lights  B: fullbright  F [ ]: fog  O - =: bloom  X: point "
            "filter  "

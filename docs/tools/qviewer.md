@@ -25,6 +25,7 @@ qviewer -m maps/e1m1.bsp
 | `--screenshot file` | save a screenshot and quit |
 | `--frames n` | frames before the screenshot, default 30 |
 | `--style-time s` | freeze the light styles at this time |
+| `--camera "x y z yaw pitch"` | start position in Quake coordinates, angles in degrees |
 
 ## Keys
 
@@ -33,6 +34,7 @@ qviewer -m maps/e1m1.bsp
 | WASD, Space, Ctrl | move, Shift is faster, the wheel changes the speed |
 | M | capture the mouse |
 | R | reset the camera |
+| C | print the camera as a `--camera` argument |
 | P | pause light styles |
 | T | switchable lights on / off |
 | B | fullbright |

@@ -5,6 +5,14 @@ For historical releases, see [HISTORY.md](HISTORY.md).
 
 ---
 
+## Unreleased
+
+### Added
+
+- **qviewer**: `--camera "x y z yaw pitch"` sets the start position, C prints the current one
+
+---
+
 ## v1.1.0 - C++ API, Light Baker & BSP2 (2026-11-18)
 
 A rewrite of the public API. Maps and bsp files load into one structure, `quakelib::Level`, and the C API
