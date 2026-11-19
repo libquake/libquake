@@ -25,6 +25,11 @@ For historical releases, see [HISTORY.md](HISTORY.md).
   `dirtScale` and `dirtSamples`; `BakeSurfaces::dirtDepthScales` and `surfaceOffsetScales` for small models
 - **qviewer** gives the baker the average color of the wad textures; `--luxel-samples n` for final bakes
 
+### Fixed
+
+- CSG: a brush with a `skip` or `clip` face still ends at that face; it cut away the faces of other brushes
+  beyond it, which left holes (qbjr_rabbit: 2.3 % of the area missing, now none)
+
 ---
 
 ## v1.1.0 - C++ API, Light Baker & BSP2 (2026-11-18)

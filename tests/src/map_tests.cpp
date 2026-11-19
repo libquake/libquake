@@ -909,6 +909,25 @@ TEST_CASE("bounce keys of the worldspawn", "[map/lightmap]") {
   REQUIRE(opts.bounceStyled);
 }
 
+TEST_CASE("a skip face still bounds its brush", "[map/csg]") {
+  // a wedge, its slanted side (x + z = 64) textured skip, and a small box just past that side: outside the
+  // wedge but inside its bounds. Skip only hides the face, the wedge ends there all the same.
+  std::string wedge = "{\n"
+                      "( 0 0 0 ) ( 0 1 0 ) ( 0 0 1 ) ground1 0 0 0 1 1\n"
+                      "( 0 0 0 ) ( 0 0 1 ) ( 1 0 0 ) ground1 0 0 0 1 1\n"
+                      "( 0 64 0 ) ( 1 64 0 ) ( 0 64 1 ) ground1 0 0 0 1 1\n"
+                      "( 0 0 0 ) ( 1 0 0 ) ( 0 1 0 ) ground1 0 0 0 1 1\n"
+                      "( 64 0 0 ) ( 63 0 1 ) ( 64 1 0 ) skip 0 0 0 1 1\n"
+                      "}\n";
+  std::string text = "{\n\"classname\" \"worldspawn\"\n" + wedge + box({50, 10, 50}, {62, 20, 62}, "ground1") + "}\n";
+  Level level = BuildMap(ParseMapText(text));
+  bool boxTop = false;
+  for (const auto &m : level.geometry[0].meshes)
+    for (const auto &v : m.vertices)
+      boxTop |= v.point[0] == 62 && v.point[1] == 20 && v.point[2] == 62;
+  REQUIRE(boxTop);
+}
+
 TEST_CASE("brush entity pivots", "[map/level]") {
   std::string text = "{\n\"classname\" \"worldspawn\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") + "}\n";
   text += "{\n\"classname\" \"func_wall\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") + "}\n";

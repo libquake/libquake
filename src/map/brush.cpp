@@ -115,11 +115,6 @@ namespace quakelib::map {
       return;
     }
 
-    if ((*plane)->Type() != MapSurface::SOLID) {
-      clipFace(face, plane + 1, planeEnd, outFaces, keepOnPlane, isCoplanar);
-      return;
-    }
-
     auto ecp = (*plane)->Classify(face.get());
     switch (ecp) {
     case MapSurface::FRONT:
