@@ -55,8 +55,9 @@ no bounce.
 Light entities (`light`, `light_fluoro`, `light_torch_small_walltorch`, ... anything starting with
 `light`) and their usual keys are read: `light`, `_color`, `wait`, `delay`, `style`, `targetname`,
 `target` and `mangle` for spot lights, `angle` and `_softangle`. From the worldspawn: `light` /
-`_minlight`, `_minlight_color`, `_anglescale`, `_range`, `_sunlight`, `_sun_mangle` and
-`_sunlight_color`.
+`_minlight`, `_minlight_color`, `_anglescale`, `_range`, `_sunlight`, `_sun_mangle`,
+`_sunlight_color`, and the sky domes `_sunlight2` / `_sunlight2_color` (light from the whole sky above) and
+`_sunlight3` / `_sunlight3_color` (from below).
 
 The world, `func_group`, `func_detail` and entities with `"_shadow" "1"` cast shadows. Sky faces block
 light. Sunlight reaches a luxel through sky or by leaving the map, so maps without sky brushes get sun

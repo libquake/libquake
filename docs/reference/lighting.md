@@ -64,10 +64,10 @@ independent share of the light fades out towards the shadow line instead of drop
 
 | `BakeLight` | Default | |
 |---|---|---|
-| `Type type` | `Point` | `Point`, `Spot` or `Sun` |
+| `Type type` | `Point` | `Point`, `Spot`, `Sun` or `SkyDome` |
 | `Falloff falloff` | `Linear` | Quake's `delay` key: `Linear`, `Inverse`, `InverseSquare`, `None`, `LocalMinlight`, `InverseSquareB` |
 | `Vec3 position` | | |
-| `Vec3 direction` | `{0, 0, -1}` | spot and sun |
+| `Vec3 direction` | `{0, 0, -1}` | spot, sun and sky dome: the way the light shines |
 | `Vec3 color` | `{1, 1, 1}` | 0..1 |
 | `float intensity` | 300 | Quake's `light` value |
 | `float distanceScale` | 1 | Quake's `wait` key |
@@ -85,6 +85,15 @@ independent share of the light fades out towards the shadow line instead of drop
 | `Vec3 ambient` | `{0, 0, 0}` | added to the static light before `minLight`, in lightmap units (128 is normal) |
 | `float surfaceOffset` | 1 | distance of the samples from the surface |
 | `int threads` | 0 | 0 uses all hardware threads |
+| `BakeQuality quality` | | never read from a map |
+
+| `BakeQuality` | Default | |
+|---|---|---|
+| `int skySamples` | 64 | suns per sky dome, rounded to its rings (ericw's `-sunsamples`) |
+
+A `SkyDome` is light from the whole sky, `_sunlight2` (from above) and `_sunlight3` (from below) in the ericw
+tools: suns on rings over a half sphere around `direction`, together as bright as `intensity`. Like a sun it
+only reaches surfaces that see the sky.
 
 | `BakeOccluders` | |
 |---|---|

@@ -239,6 +239,8 @@ namespace quakelib {
         lights.insert(lights.end(), options.extraLights.begin(), options.extraLights.end());
         if (options.bakeOptions)
           bakeOpts = *options.bakeOptions;
+        if (options.bakeQuality)
+          bakeOpts.quality = *options.bakeQuality;
         auto occluders = detail::BuildOccluders(casters, textures, options.extraOccluders);
         BakedLightmap baked = BakeLightmap(layout, occluders, lights, bakeOpts);
         level.lightmap = std::move(baked);

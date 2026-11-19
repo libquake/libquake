@@ -75,6 +75,7 @@ Level BuildMap(const MapDocument &doc, const MapBuildOptions &options = {},
 | `LightmapUVOptions lightmapUV` | planar | see [Lighting](lighting.md#lightmapuvoptions) |
 | `bool bake` | `false` | needs planar uvs |
 | `std::optional<BakeOptions> bakeOptions` | from worldspawn | |
+| `std::optional<BakeQuality> bakeQuality` | from `bakeOptions` or default | the map has no say in it |
 | `std::vector<BakeLight> extraLights` | empty | Quake coordinates |
 | `BakeOccluders extraOccluders` | empty | Quake coordinates |
 | `PivotMode pivot` | `MapOrigin` | pivot of brush entities, see [Maps](../guide/map.md#brush-entities) |

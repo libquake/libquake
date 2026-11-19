@@ -58,6 +58,58 @@ namespace quakelib {
       }
     }
 
+    /// The suns of a sky dome, laid out as in the ericw tools: rings of 4 * rings suns between the horizon and
+    /// the axis, each ring turned a little against the one below, and one sun along the axis.
+    std::vector<BakeLight> skyDomeSuns(const BakeLight &dome, int samples) {
+      const int rings = std::max(1, (int)std::lround(std::sqrt((std::max(samples, 1) - 1) / 4.0)));
+      const int perRing = rings * 4;
+
+      // two directions across the axis
+      const Vec3 axis = dome.direction;
+      const Vec3 helper = std::abs(axis[2]) < 0.9f ? Vec3{0, 0, 1} : Vec3{1, 0, 0};
+      const Vec3 u = math::Norm(math::Cross(helper, axis));
+      const Vec3 v = math::Cross(axis, u);
+
+      BakeLight sun = dome;
+      sun.type = BakeLight::Type::Sun;
+      sun.intensity = dome.intensity / (float)(rings * perRing + 1);
+
+      std::vector<BakeLight> suns;
+      const float elevationStep = (float)HMM_PI * 0.5f / (float)(rings + 1);
+      const float angleStep = 2.0f * (float)HMM_PI / (float)perRing;
+      float angle = 0;
+      for (int ring = 0; ring < rings; ring++) {
+        float elevation = elevationStep * (ring + 0.5f);
+        for (int i = 0; i < perRing; i++) {
+          Vec3 across = u * std::cos(angle) + v * std::sin(angle);
+          sun.direction = axis * std::sin(elevation) + across * std::cos(elevation);
+          suns.push_back(sun);
+          angle += angleStep;
+        }
+        angle += angleStep / (float)rings;
+      }
+      sun.direction = axis;
+      suns.push_back(sun);
+      return suns;
+    }
+
+    /// Directions normalized, sky domes split into their suns.
+    std::vector<BakeLight> prepareLights(const std::vector<BakeLight> &lights, const BakeQuality &quality) {
+      std::vector<BakeLight> out;
+      for (auto l : lights) {
+        if (l.type != BakeLight::Type::Point)
+          l.direction = math::Norm(l.direction);
+        if (l.type != BakeLight::Type::SkyDome) {
+          out.push_back(l);
+          continue;
+        }
+
+        auto suns = skyDomeSuns(l, quality.skySamples);
+        out.insert(out.end(), suns.begin(), suns.end());
+      }
+      return out;
+    }
+
     // smooth surfaces: cosine below which the angle independent share fades out
     constexpr float SMOOTH_TERMINATOR = 0.2f;
 
@@ -448,11 +500,7 @@ namespace quakelib {
     out.width = layout.width;
     out.height = layout.height;
 
-    std::vector<BakeLight> ls = lights;
-    for (auto &l : ls) {
-      if (l.type != BakeLight::Type::Point)
-        l.direction = math::Norm(l.direction);
-    }
+    std::vector<BakeLight> ls = prepareLights(lights, options.quality);
     std::vector<float> ranges;
     for (const auto &l : ls)
       ranges.push_back(lightRange(l));
@@ -521,12 +569,10 @@ namespace quakelib {
     out.width = surfaces.width;
     out.height = surfaces.height;
 
-    std::vector<BakeLight> ls = lights;
+    std::vector<BakeLight> ls = prepareLights(lights, options.quality);
     std::vector<float> ranges;
     out.styles.push_back(0);
     for (auto &l : ls) {
-      if (l.type != BakeLight::Type::Point)
-        l.direction = math::Norm(l.direction);
       ranges.push_back(lightRange(l));
       if (std::find(out.styles.begin(), out.styles.end(), l.style) == out.styles.end())
         out.styles.push_back(l.style);
@@ -676,6 +722,29 @@ namespace quakelib {
         if (!worldspawn->Get("_sunlight_color").empty())
           s.color = parseColor(worldspawn->Get("_sunlight_color"));
         lights.push_back(s);
+      }
+
+      // sky domes: _sunlight2 shines down from the sky above, _sunlight3 up from below
+      const struct {
+        const char *key, *color, *colorAlias;
+        float z;
+      } domes[] = {
+          {"_sunlight2", "_sunlight2_color", "_sunlight_color2", -1.0f},
+          {"_sunlight3", "_sunlight3_color", "_sunlight_color3", 1.0f},
+      };
+      for (const auto &d : domes) {
+        float value = (float)std::atof(worldspawn->Get(d.key).c_str());
+        if (value <= 0)
+          continue;
+
+        BakeLight dome;
+        dome.type = BakeLight::Type::SkyDome;
+        dome.intensity = value;
+        dome.direction = toEngine(Vec3{0, 0, d.z});
+        auto color = !worldspawn->Get(d.color).empty() ? worldspawn->Get(d.color) : worldspawn->Get(d.colorAlias);
+        if (!color.empty())
+          dome.color = parseColor(color);
+        lights.push_back(dome);
       }
     }
     if (optionsOut)

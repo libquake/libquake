@@ -611,9 +611,9 @@ TEST_CASE("spot lights read their cone angle", "[map/lightmap]") {
   REQUIRE(lights[0].direction[2] < -0.99f);
 }
 
-TEST_CASE("surface baker", "[map/lightmap]") {
+namespace {
   // a 256 x 256 floor in the texels 4..20 of a 24 x 24 atlas, 16 units per texel
-  auto floor = [](Vec3 normal) {
+  BakeSurfaces floor(Vec3 normal) {
     BakeSurfaces s;
     s.width = s.height = 24;
     s.padding = 1;
@@ -624,10 +624,14 @@ TEST_CASE("surface baker", "[map/lightmap]") {
       s.uvs.push_back(Vec2{corners[k][0] / 16 + 4, corners[k][1] / 16 + 4});
     }
     return s;
-  };
-  auto texel = [](const BakedLightmap &b, int x, int y, int channel = 0) {
+  }
+
+  int texel(const BakedLightmap &b, int x, int y, int channel = 0) {
     return (int)b.layers[0][((size_t)y * b.width + x) * 4 + channel];
-  };
+  }
+} // namespace
+
+TEST_CASE("surface baker", "[map/lightmap]") {
   BakeLight light;
   light.position = {136, 136, 128};
 
@@ -650,6 +654,47 @@ TEST_CASE("surface baker", "[map/lightmap]") {
   int smooth = texel(BakeLightmap(floor(math::Norm(Vec3{0.05f, 0, 1})), {}, {grazing}), 5, 12);
   REQUIRE(flat > 50);
   REQUIRE(smooth < flat / 2);
+}
+
+TEST_CASE("sky dome", "[map/lightmap]") {
+  BakeLight dome;
+  dome.type = BakeLight::Type::SkyDome;
+  dome.intensity = 200;
+
+  // 65 suns on 4 rings at 9, 27, 45 and 63 degrees and one straight down, their cosines average 0.559:
+  // 200 * (0.5 + 0.5 * 0.559) * range scale 0.5
+  int open = texel(BakeLightmap(floor({0, 0, 1}), {}, {dome}), 12, 12);
+  REQUIRE(std::abs(open - 78) <= 1);
+
+  // a roof over the texel keeps the steep suns out, the flat ones still pass under it
+  BakeOccluders roof;
+  roof.triangles = {{100, 100, 64}, {200, 100, 64}, {200, 200, 64}, {100, 100, 64}, {200, 200, 64}, {100, 200, 64}};
+  int covered = texel(BakeLightmap(floor({0, 0, 1}), roof, {dome}), 12, 12);
+  REQUIRE(covered > 0);
+  REQUIRE(covered < open * 3 / 4);
+
+  // through sky the dome shines as in the open
+  roof.isSky = {1, 1};
+  REQUIRE(texel(BakeLightmap(floor({0, 0, 1}), roof, {dome}), 12, 12) == open);
+
+  // fewer suns, about the same light
+  BakeOptions coarse;
+  coarse.quality.skySamples = 16;
+  REQUIRE(std::abs(texel(BakeLightmap(floor({0, 0, 1}), {}, {dome}, coarse), 12, 12) - open) <= 4);
+}
+
+TEST_CASE("sunlight2 and sunlight3 become sky domes", "[map/lightmap]") {
+  std::vector<LevelEntity> ents(1);
+  ents[0].classname = "worldspawn";
+  ents[0].attributes = {{"_sunlight2", "160"}, {"_sunlight2_color", "255 230 199"}, {"_sunlight3", "50"}};
+  auto lights = QuakeLightsFromEntities(ents);
+  REQUIRE(lights.size() == 2);
+  REQUIRE(lights[0].type == BakeLight::Type::SkyDome);
+  REQUIRE(lights[0].intensity == 160);
+  REQUIRE(lights[0].direction[2] == -1);
+  REQUIRE(std::abs(lights[0].color[1] - 230 / 255.0f) < 1e-4f);
+  REQUIRE(lights[1].type == BakeLight::Type::SkyDome);
+  REQUIRE(lights[1].direction[2] == 1);
 }
 
 namespace {

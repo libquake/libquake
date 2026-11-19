@@ -12,6 +12,9 @@ For historical releases, see [HISTORY.md](HISTORY.md).
 - **Embree** for the baker's rays, linked statically from `third_party/embree` (macOS so far), 3 to 7 times
   faster bakes; `QLIB_EMBREE=OFF` or a platform without a prebuilt keeps the own bvh
 - **qviewer**: `--camera "x y z yaw pitch"` sets the start position, C prints the current one
+- **Sky domes**: `_sunlight2` and `_sunlight3` with their colors, `BakeLight::Type::SkyDome`
+- **`BakeQuality`**: settings that trade bake time for quality and never come from a map, `skySamples` for now;
+  `MapBuildOptions::bakeQuality`
 
 ---
 

@@ -14,9 +14,13 @@ namespace quakelib {
   /**
    * @brief A light for the baker. Values follow the Quake light tools: `intensity` 300 lights a surface
    * right next to it to 255, the lightmap byte range.
+   *
+   * A sky dome is light from the whole sky, as _sunlight2 (from above) and _sunlight3 (from below) in the
+   * ericw tools: suns spread over a half sphere around `direction`, together as bright as `intensity`. Like a
+   * sun it only reaches surfaces that see the sky.
    */
   struct BakeLight {
-    enum class Type { Point, Spot, Sun };
+    enum class Type { Point, Spot, Sun, SkyDome };
 
     /// distance falloff, the numbers match the "delay" key of Quake lights
     enum class Falloff {
@@ -31,7 +35,7 @@ namespace quakelib {
     Type type = Type::Point;
     Falloff falloff = Falloff::Linear;
     Vec3 position{};
-    Vec3 direction{0, 0, -1}; ///< spot and sun: the direction the light shines in
+    Vec3 direction{0, 0, -1}; ///< spot, sun and sky dome: the direction the light shines in
     Vec3 color{1, 1, 1};      ///< 0..1
     float intensity = 300.0f;
     float distanceScale = 1.0f; ///< the "wait" key, larger values shorten the reach
@@ -39,6 +43,15 @@ namespace quakelib {
     float softAngle = 0.0f;     ///< spot: inner angle with full intensity, 0 means a hard edge
     int style = 0;              ///< 0 is static, 1..63 animated or switchable
     bool castShadows = true;
+  };
+
+  /**
+   * @brief How finely the baker samples, never read from a map. Higher values cost time, the defaults match
+   * the ericw tools.
+   */
+  struct BakeQuality {
+    /// suns per sky dome, rounded to the dome's rings (ericw's -sunsamples)
+    int skySamples = 64;
   };
 
   struct BakeOptions {
@@ -55,6 +68,7 @@ namespace quakelib {
     float surfaceOffset = 1.0f;
     /// 0 uses all hardware threads
     int threads = 0;
+    BakeQuality quality;
   };
 
   /**
@@ -101,7 +115,8 @@ namespace quakelib {
    *
    * Supports light / _light, _color, wait, delay, style, targetname (switchable lights get styles from 32
    * up), target / mangle (spot lights) with angle and _softangle, and on the worldspawn light / _minlight,
-   * _minlight_color, _anglescale / _anglesense, _range, _sunlight, _sun_mangle and _sunlight_color.
+   * _minlight_color, _anglescale / _anglesense, _range, _sunlight, _sun_mangle, _sunlight_color, _sunlight2,
+   * _sunlight2_color, _sunlight3 and _sunlight3_color.
    *
    * The worldspawn is looked up in the list.
    *

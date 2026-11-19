@@ -34,6 +34,8 @@ namespace quakelib {
     bool bake = false;
     /// replaces the settings read from the worldspawn
     std::optional<BakeOptions> bakeOptions;
+    /// replaces the quality of bakeOptions or the default, the map has no say in it
+    std::optional<BakeQuality> bakeQuality;
     /// baked in addition to the map's own lights, e.g. engine lights
     std::vector<BakeLight> extraLights;
     /// shadow casters in addition to the map's brushes, e.g. a neighbouring map segment

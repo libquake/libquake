@@ -123,6 +123,7 @@ typedef enum QLibLightType {
   QLIB_LIGHT_POINT = 0,
   QLIB_LIGHT_SPOT = 1,
   QLIB_LIGHT_SUN = 2,
+  QLIB_LIGHT_SKY_DOME = 3,
 } QLibLightType;
 
 /// an additional light for the baker, in map coordinates, same meaning as quakelib::BakeLight
