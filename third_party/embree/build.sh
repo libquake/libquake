@@ -134,8 +134,8 @@ Linux)
     exit 1
   fi
   # libquake's dll shares the C runtime dll with its users, the Godot extension links the runtime statically:
-  # one build for each, both with SSE2, SSE4.2 and AVX2 kernels
-  isas=(-DEMBREE_ISA_AVX=OFF -DEMBREE_ISA_AVX512=OFF -DCMAKE_POLICY_DEFAULT_CMP0091=NEW)
+  # one build for each, with Embree's usual kernels but AVX-512; MSVC builds the 8 wide types in the AVX part
+  isas=(-DEMBREE_ISA_AVX512=OFF -DCMAKE_POLICY_DEFAULT_CMP0091=NEW)
   build dll "${isas[@]}" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL
   build static "${isas[@]}" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
   pack dll lib

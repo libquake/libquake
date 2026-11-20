@@ -7,7 +7,7 @@
 |---|---|
 | `include/embree4` | headers, the same for every platform |
 | `macos` | universal: NEON2X on arm64, SSE4.2 on x86_64 |
-| `windows-x64` | SSE2, SSE4.2 and AVX2, for builds with the C runtime dll (`/MD`), like libquake's dll |
+| `windows-x64` | SSE2, SSE4.2, AVX and AVX2, for builds with the C runtime dll (`/MD`), like libquake's dll |
 | `windows-x64-static-runtime` | the same for builds that link the runtime statically (`/MT`), like the Godot extension; `QLIB_EMBREE_STATIC_RUNTIME=ON` picks it |
 
 Every platform folder has `libembree4.a` and `libembree4_isa.a` (`embree4.lib` and `embree4_isa.lib` on
