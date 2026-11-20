@@ -44,15 +44,60 @@ namespace quakelib::map {
       if (IsLiquidTexture(m_map_file->m_textures[i]))
         liquidTextures.insert(i);
 
-    for (const auto &se : m_map_file->m_solidEntities) {
+    const auto &entities = m_map_file->m_solidEntities;
+    for (const auto &se : entities)
       se->generateMesh(m_textureIDTypes, m_textureIDBounds, liquidTextures);
-      if (clipBrushes) {
-        se->csgUnion();
-      }
-      if (m_config.convertCoordToOGL) {
-        se->convertToOpenGLCoords();
+
+    if (clipBrushes) {
+      // the world model of the Quake compilers: its brushes cut each other's faces across entities, as the
+      // compiled maps show: the world cuts the world, func_detail cuts detail and world, the world leaves
+      // detail faces whole; func_detail_wall, _illusionary and _fence cut nothing
+      auto isDetail = [](const SolidMapEntity &e) { return e.ClassName().rfind("func_detail", 0) == 0; };
+      auto inWorld = [&](const SolidMapEntity &e) {
+        const auto &c = e.ClassName();
+        return c == "worldspawn" || c == "func_group" || isDetail(e);
+      };
+      auto cuts = [&](const SolidMapEntity &cutter, const SolidMapEntity &e) {
+        const auto &c = cutter.ClassName();
+        if (c == "func_detail")
+          return true;
+
+        return (c == "worldspawn" || c == "func_group") && !isDetail(e);
+      };
+      auto boundsOf = [](SolidMapEntity &e, Vec3 &min, Vec3 &max) {
+        min = Vec3{1e30f, 1e30f, 1e30f};
+        max = Vec3{-1e30f, -1e30f, -1e30f};
+        for (auto &b : e.m_brushes)
+          b.GetBiggerBBox(min, max);
+      };
+      std::vector<Vec3> mins(entities.size()), maxs(entities.size());
+      for (size_t i = 0; i < entities.size(); i++)
+        boundsOf(*entities[i], mins[i], maxs[i]);
+      auto overlap = [&](size_t a, size_t b) {
+        for (int k = 0; k < 3; k++)
+          if (mins[a][k] > maxs[b][k] || mins[b][k] > maxs[a][k])
+            return false;
+
+        return true;
+      };
+
+      for (size_t i = 0; i < entities.size(); i++) {
+        std::vector<SolidMapEntity::OtherBrush> others;
+        if (inWorld(*entities[i]))
+          for (size_t j = 0; j < entities.size(); j++) {
+            if (j == i || !cuts(*entities[j], *entities[i]) || !overlap(i, j))
+              continue;
+
+            for (const auto &b : entities[j]->m_brushes)
+              others.push_back({&b, i < j});
+          }
+        entities[i]->csgUnion(others);
       }
     }
+
+    if (m_config.convertCoordToOGL)
+      for (const auto &se : entities)
+        se->convertToOpenGLCoords();
 
     if (m_config.convertCoordToOGL) {
       for (const auto &pe : m_map_file->m_pointEntities) {

@@ -30,7 +30,7 @@ through `textureSize`. Unknown textures get uv 0.
 
 | `MapBuildOptions` | Default | |
 |---|---|---|
-| `csg` | `true` | remove faces hidden inside other brushes of the same entity |
+| `csg` | `true` | remove faces hidden inside other brushes, see below for which cut each other |
 | `convertToOpenGL` | `false` | y up, applied at the end |
 | `textureSize` | none | see above |
 | `faceTypes` | empty | surface type by texture name, on top of `DefaultSurfaceType` |
@@ -79,8 +79,12 @@ With `MapBuildOptions::mergeGroups` each TrenchBroom group becomes one geometry,
 brush entities in a group (key `_tb_group`) join the group's own `func_group`, nested groups the outermost one,
 and keep no geometry of their own. The pivot is then the one of the whole group.
 
-CSG only removes faces between brushes of the same entity. `func_group` and `func_detail` are separate
-entities and are not merged with the world.
+CSG removes faces hidden inside other brushes of the same entity and, as the Quake compilers do it, across
+the entities of the world: brushes of the worldspawn and of `func_group`s cut each other, `func_detail`
+cuts other `func_detail`s and the world, but the world leaves the faces of detail whole, the compiled maps
+keep them. `func_detail_wall`, `func_detail_illusionary` and `func_detail_fence` cut no other entity. They
+stay separate entities, they are not merged with the world. Brush entities that move, like doors, only cut
+themselves.
 
 Liquid brushes hide nothing: the floor and walls under the water keep their faces, so they stay visible
 through it. The liquid itself is still cut by solid brushes and other liquids, its faces inside a wall or

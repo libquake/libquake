@@ -13,7 +13,7 @@ namespace quakelib::map {
     return res;
   }
 
-  void SolidMapEntity::csgUnion() {
+  void SolidMapEntity::csgUnion(const std::vector<OtherBrush> &others) {
     if (!m_brushes.empty()) {
       m_min = m_brushes[0].min;
       m_max = m_brushes[0].max;
@@ -32,29 +32,27 @@ namespace quakelib::map {
         continue;
       }
 
-      for (auto &b2 : m_brushes) {
-        if (&b1 == &b2 || b2.m_faces.empty()) {
-          continue;
-        }
+      auto clipBy = [&](const Brush &b2, bool keepOnPlane) {
+        if (&b1 == &b2 || b2.m_faces.empty())
+          return;
 
         // Don't clip against non-solid brushes
-        if (b2.IsNonSolidBrush()) {
-          continue;
-        }
+        if (b2.IsNonSolidBrush())
+          return;
 
         // what lies under water stays visible through it, walls and other water still cut the water
-        if (b2.IsLiquidBrush() && !b1.IsLiquidBrush()) {
-          continue;
-        }
+        if (b2.IsLiquidBrush() && !b1.IsLiquidBrush())
+          return;
 
-        if (!b1.DoesIntersect(b2) || (b1.IsBlockVolume() || b2.IsBlockVolume())) {
-          continue;
-        }
+        if (!b1.DoesIntersect(b2) || (b1.IsBlockVolume() || b2.IsBlockVolume()))
+          return;
 
-        bool keepOnPlane = &b1 < &b2;
-        auto clippedFaces = cpBrush.clipToBrush(b2, keepOnPlane);
-        cpBrush.m_faces = clippedFaces;
-      }
+        cpBrush.m_faces = cpBrush.clipToBrush(b2, keepOnPlane);
+      };
+      for (auto &b2 : m_brushes)
+        clipBy(b2, &b1 < &b2);
+      for (const auto &other : others)
+        clipBy(*other.brush, other.keepOnPlane);
       if (!cpBrush.m_faces.empty()) {
         cpBrush.indexFaceVertices();
         m_clippedBrushes.push_back(cpBrush);

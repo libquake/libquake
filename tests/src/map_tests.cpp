@@ -1062,6 +1062,54 @@ TEST_CASE("phong shading in the bake", "[map/phong]") {
   REQUIRE(std::abs(smoothEave - flatEave) <= 2);
 }
 
+TEST_CASE("brushes of the world model cut each other across entities", "[map/csg]") {
+  // a box of `cutter` standing in a floor of `floor`; cut, the floor's top keeps no face under the box
+  auto floorUnderBox = [](const std::string &floor, const std::string &cutter) {
+    std::string text = "{\n\"classname\" \"worldspawn\"\n";
+    text += floor == "worldspawn" ? box({0, 0, -16}, {256, 256, 0}, "ground1") : "";
+    text += cutter == "worldspawn" ? box({96, 96, -8}, {160, 160, 64}, "ground1") : "";
+    text += "}\n";
+    if (floor != "worldspawn")
+      text += "{\n\"classname\" \"" + floor + "\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") + "}\n";
+    if (cutter != "worldspawn")
+      text += "{\n\"classname\" \"" + cutter + "\"\n" + box({96, 96, -8}, {160, 160, 64}, "ground1") + "}\n";
+    Level level = BuildMap(ParseMapText(text));
+    // a face of the floor's top covers the middle under the box
+    const Vec2 middle{128, 128};
+    auto side = [](Vec2 a, Vec2 b, Vec2 p) { return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]); };
+    for (const auto &geometry : level.geometry)
+      for (const auto &m : geometry.meshes)
+        for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
+          Vec2 corner[3];
+          bool top = m.vertices[m.indices[i]].normal[2] > 0.99f;
+          for (int k = 0; k < 3; k++) {
+            Vec3 p = m.vertices[m.indices[i + k]].point + geometry.pivot;
+            top &= std::abs(p[2]) < 0.01f;
+            corner[k] = Vec2{p[0], p[1]};
+          }
+          if (!top)
+            continue;
+
+          float d1 = side(corner[0], corner[1], middle), d2 = side(corner[1], corner[2], middle),
+                d3 = side(corner[2], corner[0], middle);
+          if ((d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0))
+            return true;
+        }
+    return false;
+  };
+
+  REQUIRE_FALSE(floorUnderBox("func_detail", "func_detail"));
+  REQUIRE_FALSE(floorUnderBox("worldspawn", "func_detail"));
+  REQUIRE_FALSE(floorUnderBox("func_group", "worldspawn"));
+  // as the compiled maps have it: the world leaves the faces of detail whole
+  REQUIRE(floorUnderBox("func_detail", "worldspawn"));
+  REQUIRE(floorUnderBox("func_detail", "func_detail_wall"));
+  REQUIRE(floorUnderBox("worldspawn", "func_detail_illusionary"));
+  // entities that move are not part of the world
+  REQUIRE(floorUnderBox("worldspawn", "func_door"));
+  REQUIRE(floorUnderBox("func_wall", "worldspawn"));
+}
+
 TEST_CASE("brush entity pivots", "[map/level]") {
   std::string text = "{\n\"classname\" \"worldspawn\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") + "}\n";
   text += "{\n\"classname\" \"func_wall\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") + "}\n";

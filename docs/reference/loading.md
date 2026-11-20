@@ -68,7 +68,7 @@ Level BuildMap(const MapDocument &doc, const MapBuildOptions &options = {},
 
 | `MapBuildOptions` | Default | |
 |---|---|---|
-| `bool csg` | `true` | remove faces hidden by other brushes of the same entity |
+| `bool csg` | `true` | remove faces hidden by other brushes: of the same entity, and across the world's entities as the Quake compilers do |
 | `bool convertToOpenGL` | `false` | applied after building and baking |
 | `std::function<std::pair<int, int>(const std::string &)> textureSize` | none | width and height by texture name |
 | `std::function<Vec3(const std::string &)> textureColor` | none | average color (0..1) by texture name, for bounced light; gray without |

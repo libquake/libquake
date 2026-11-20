@@ -38,7 +38,13 @@ namespace quakelib::map {
   private:
     void generateMesh(const std::map<int, MapSurface::eFaceType> &faceTypes,
                       const std::map<int, textureBounds> &texBounds, const std::set<int> &liquidTextures);
-    void csgUnion();
+    /// a brush of another entity that cuts this one's faces; on a shared plane the face of the entity that
+    /// comes first stays
+    struct OtherBrush {
+      const Brush *brush;
+      bool keepOnPlane;
+    };
+    void csgUnion(const std::vector<OtherBrush> &others);
     void weldVertices();
     void fixTJunctions();
     void removeCollinearVertices();

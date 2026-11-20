@@ -31,6 +31,9 @@ For historical releases, see [HISTORY.md](HISTORY.md).
 
 - CSG: a brush with a `skip` or `clip` face still ends at that face; it cut away the faces of other brushes
   beyond it, which left holes (qbjr_rabbit: 2.3 % of the area missing, now none)
+- CSG across the world's entities as in the Quake compilers: worldspawn and `func_group` cut each other,
+  `func_detail` cuts other details and the world; faces of one detail inside another were kept and baked black
+  (qbj3_radiatoryang)
 - CSG: faces that collapse to a line, the top and bottom of very thin wedges, are dropped; their old indices
   pointed past their corners, gave stray triangles and crashed the lightmap layout (qbj3_radiatoryang)
 
