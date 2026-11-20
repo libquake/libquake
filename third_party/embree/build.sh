@@ -1,7 +1,8 @@
 #!/bin/bash
 # Builds the static Embree that libquake's baker links, for the platform this runs on, and puts it next to
-# this script: include/embree4 and <platform>/libembree4.a. Needs curl, cmake and a C++ compiler, ninja is
-# used when installed.
+# this script: include/embree4 and <platform>/libembree4.a (embree4.lib on Windows). Needs curl, cmake and a
+# C++ compiler, ninja is used when installed. On Windows it runs in Git Bash with Visual Studio and needs
+# llvm-lib, which comes with Visual Studio's clang tools or LLVM.
 set -euo pipefail
 
 VERSION=4.4.1
@@ -12,7 +13,8 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 curl -fsSL "https://github.com/RenderKit/embree/archive/refs/tags/v$VERSION.tar.gz" -o "$work/embree.tar.gz"
-echo "$SHA256  $work/embree.tar.gz" | shasum -a 256 -c - > /dev/null
+echo "$SHA256  $work/embree.tar.gz" | sha256sum -c - > /dev/null 2>&1 ||
+  echo "$SHA256  $work/embree.tar.gz" | shasum -a 256 -c - > /dev/null
 tar xzf "$work/embree.tar.gz" -C "$work"
 src="$work/embree-$VERSION"
 
@@ -37,7 +39,12 @@ options=(
   -DEMBREE_RAY_MASK=OFF
   -DEMBREE_FILTER_FUNCTION=OFF
 )
-if command -v ninja > /dev/null; then
+windows=false
+case "$(uname -s)" in
+MINGW* | MSYS* | CYGWIN*) windows=true ;;
+esac
+# Visual Studio's generator finds the compiler by itself, ninja would need its environment
+if ! $windows && command -v ninja > /dev/null; then
   options+=(-G Ninja)
 fi
 
@@ -47,8 +54,8 @@ build() {
   shift
   echo "building Embree $VERSION ($name)"
   if ! { cmake -S "$src" -B "$work/build-$name" "${options[@]}" -DCMAKE_INSTALL_PREFIX="$work/install-$name" "$@" &&
-    cmake --build "$work/build-$name" --parallel &&
-    cmake --install "$work/build-$name"; } > "$work/$name.log" 2>&1; then
+    cmake --build "$work/build-$name" --config Release --parallel &&
+    cmake --install "$work/build-$name" --config Release; } > "$work/$name.log" 2>&1; then
     tail -40 "$work/$name.log"
     exit 1
   fi
@@ -60,6 +67,10 @@ merge() {
   shift
   if [[ $(uname -s) == Darwin ]]; then
     /usr/bin/libtool -static -no_warning_for_no_symbols -o "$out" "$@"
+  elif $windows; then
+    local libtool
+    libtool=$(command -v llvm-lib || echo "/c/Program Files/LLVM/bin/llvm-lib.exe")
+    "$libtool" -nologo -out:"$(cygpath -w "$out")" $(for lib in "$@"; do cygpath -w "$lib"; done)
   else
     {
       echo "CREATE $out"
@@ -72,19 +83,19 @@ merge() {
   fi
 }
 
-# pack <name>: $work/<name>.a from Embree's core archives, $work/<name>_isa.a from its per ISA archives. They
-# stay apart, the core holds the same files built for the base ISA.
+# pack <name> [extension]: $work/<name>.<extension> from Embree's core archives, $work/<name>_isa.<extension>
+# from its per ISA archives. They stay apart, the core holds the same files built for the base ISA.
 pack() {
-  local core=() isa=()
-  for lib in "$work/install-$1"/lib/*.a; do
+  local ext=${2:-a} core=() isa=()
+  for lib in "$work/install-$1"/lib/*."$ext"; do
     case $(basename "$lib") in
-    libembree_*) isa+=("$lib") ;;
+    libembree_* | embree_*) isa+=("$lib") ;;
     *) core+=("$lib") ;;
     esac
   done
-  merge "$work/$1.a" "${core[@]}"
+  merge "$work/$1.$ext" "${core[@]}"
   if ((${#isa[@]})); then
-    merge "$work/$1_isa.a" "${isa[@]}"
+    merge "$work/$1_isa.$ext" "${isa[@]}"
   fi
 }
 
@@ -118,8 +129,26 @@ Linux)
   fi
   ;;
 *)
-  echo "no build for $(uname -s) yet" >&2
-  exit 1
+  if ! $windows; then
+    echo "no build for $(uname -s) yet" >&2
+    exit 1
+  fi
+  # libquake's dll shares the C runtime dll with its users, the Godot extension links the runtime statically:
+  # one build for each, both with SSE2, SSE4.2 and AVX2 kernels
+  isas=(-DEMBREE_ISA_AVX=OFF -DEMBREE_ISA_AVX512=OFF -DCMAKE_POLICY_DEFAULT_CMP0091=NEW)
+  build dll "${isas[@]}" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL
+  build static "${isas[@]}" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+  pack dll lib
+  pack static lib
+  platform=windows-x64
+  for variant in "$platform" "$platform-static-runtime"; do
+    rm -rf "${here:?}/$variant"
+    mkdir -p "$here/$variant"
+  done
+  cp "$work/dll.lib" "$here/$platform/embree4.lib"
+  cp "$work/dll_isa.lib" "$here/$platform/embree4_isa.lib"
+  cp "$work/static.lib" "$here/$platform-static-runtime/embree4.lib"
+  cp "$work/static_isa.lib" "$here/$platform-static-runtime/embree4_isa.lib"
   ;;
 esac
 

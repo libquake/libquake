@@ -1,0 +1,41 @@
+# Builds the Windows prebuilts of third_party/embree on demand, links libquake with both and runs its tests
+# with the one for the C runtime dll. The result is an artifact to commit to third_party/embree.
+name: embree
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build embree
+        run: third_party/embree/build.sh
+
+      - name: libquake with embree, tests
+        run: |
+          cmake -B build -DQLIB_BUILD_VIEWER=OFF 2>&1 | tee configure.log
+          grep -q "baker traces with Embree" configure.log
+          cmake --build build --config Release --parallel 4
+
+      - name: libquake with the static runtime embree
+        run: |
+          cmake -B build-static -DQLIB_BUILD_VIEWER=OFF -DQLIB_BUILD_TESTS=OFF -DQLIB_EMBREE_STATIC_RUNTIME=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded 2>&1 | tee configure.log
+          grep -q "baker traces with Embree" configure.log
+          cmake --build build-static --config Release --parallel 4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: embree-windows
+          path: |
+            third_party/embree/windows-x64
+            third_party/embree/windows-x64-static-runtime
+            third_party/embree/include
+            third_party/embree/LICENSE.txt
+          if-no-files-found: error

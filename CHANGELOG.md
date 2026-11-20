@@ -5,6 +5,15 @@ For historical releases, see [HISTORY.md](HISTORY.md).
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Embree on Windows**: prebuilts for the C runtime dll and for the static runtime (`QLIB_EMBREE_STATIC_RUNTIME`),
+  built by the `embree` workflow; MSVC debug builds keep the own bvh
+
+---
+
 ## v1.2.0 - Embree, Bounced Light, Ambient Occlusion & Phong (2026-11-20)
 
 ### Added
