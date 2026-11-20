@@ -125,6 +125,69 @@ namespace quakelib::detail {
     return result;
   }
 
+  void SmoothNormals(std::vector<RenderMesh> &meshes, float maxAngle) {
+    struct Around {
+      Vec3 normal; ///< of a face at this point
+      float weight;
+    };
+    // faces at each point, faces with the same normal add up
+    std::unordered_map<WeldKey, std::vector<Around>, WeldKeyHash> points;
+    auto keyOf = [](const Vec3 &p) {
+      return WeldKey{{quantize(p[0], 0.01f), quantize(p[1], 0.01f), quantize(p[2], 0.01f), 0, 0, 0, 0, 0}};
+    };
+    for (const auto &mesh : meshes) {
+      if (mesh.type != SurfaceType::SOLID)
+        continue;
+
+      for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
+        for (int k = 0; k < 3; k++) {
+          const auto &v = mesh.vertices[mesh.indices[i + k]];
+          Vec3 a = mesh.vertices[mesh.indices[i + (k + 1) % 3]].point - v.point;
+          Vec3 b = mesh.vertices[mesh.indices[i + (k + 2) % 3]].point - v.point;
+          float la = math::Len(a), lb = math::Len(b);
+          if (la <= 0 || lb <= 0)
+            continue;
+
+          float corner = std::acos(std::clamp(math::Dot(a, b) / (la * lb), -1.0f, 1.0f));
+          auto &around = points[keyOf(v.point)];
+          auto same = std::find_if(around.begin(), around.end(),
+                                   [&](const Around &f) { return math::Dot(f.normal, v.normal) > 0.9999f; });
+          if (same != around.end())
+            same->weight += corner;
+          else
+            around.push_back({v.normal, corner});
+        }
+    }
+
+    const float minCos = std::cos(maxAngle * (float)HMM_PI / 180.0f);
+    for (auto &mesh : meshes) {
+      if (mesh.type != SurfaceType::SOLID)
+        continue;
+
+      // vertices are welded by normal too, a vertex belongs to faces of one normal
+      for (auto &v : mesh.vertices) {
+        auto it = points.find(keyOf(v.point));
+        if (it == points.end())
+          continue;
+
+        Vec3 sum{0, 0, 0};
+        for (const auto &f : it->second)
+          if (math::Dot(f.normal, v.normal) >= minCos)
+            sum += f.normal * f.weight;
+        if (math::Len(sum) < 1e-6f)
+          continue;
+
+        v.normal = math::Norm(sum);
+        Vec3 t{v.tangent[0], v.tangent[1], v.tangent[2]};
+        t = t - v.normal * math::Dot(v.normal, t);
+        if (math::Len(t) > 1e-6f) {
+          t = math::Norm(t);
+          v.tangent = Vec4{t[0], t[1], t[2], v.tangent[3]};
+        }
+      }
+    }
+  }
+
   bool GenerateXAtlasUVs(std::vector<RenderMesh> &meshes, const LightmapUVOptions &options, int &width,
                          int &height) {
     // All solid meshes of the entity go into one welded mesh, so lightmap charts are not cut at texture
@@ -286,6 +349,14 @@ namespace quakelib::detail {
     if (c == "worldspawn" || c == "func_group" || c.rfind("func_detail", 0) == 0)
       return true;
     return e.Int("_shadow") != 0;
+  }
+
+  float PhongAngle(const LevelEntity &e) {
+    float angle = e.Float("_phong_angle");
+    if (angle > 0)
+      return angle;
+
+    return e.Int("_phong") != 0 ? 89.0f : 0.0f;
   }
 
   BakeOccluders BuildOccluders(const std::vector<map::SolidMapEntity *> &entities,

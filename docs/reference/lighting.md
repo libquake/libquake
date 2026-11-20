@@ -176,6 +176,7 @@ charts are split. The result is deterministic.
 | `int width`, `height` | in luxels |
 | `int atlasX`, `atlasY` | position in the atlas |
 | `std::vector<Vec3> triangles` | world positions |
+| `std::vector<Vec3> normals` | vertex normals, 3 per triangle, only on smoothed surfaces (`_phong`); the baker lights with them, blended per sample |
 | `std::vector<Vec3> colors` | one per triangle, average texture color for bounced light, empty without `textureColor` |
 | `Vec3 LuxelPosition(float i, float j, float luxelSize) const` | world position of a luxel |
 

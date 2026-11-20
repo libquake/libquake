@@ -204,6 +204,8 @@ namespace quakelib {
       auto &se = *solids[solid++];
       EntityGeometry geo;
       geo.meshes = detail::BuildEntityMeshes(se, textures);
+      if (float angle = detail::PhongAngle(ent); angle > 0)
+        detail::SmoothNormals(geo.meshes, angle);
       geo.hulls = detail::BuildCollisionHulls(se, textures);
       setBounds(geo);
       if (auto origin = detail::OriginBrushCenter(se, textures))

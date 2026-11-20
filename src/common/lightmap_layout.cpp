@@ -31,6 +31,8 @@ namespace quakelib {
       int index; // first index of the triangle in the mesh index buffer
       Vec3 p[3];
       Vec3 normal;
+      Vec3 vertexNormal[3];
+      bool smooth; ///< vertex normals that differ from the plane's
     };
 
     struct UnionFind {
@@ -195,9 +197,23 @@ namespace quakelib {
         Tri t{m, i};
         for (int k = 0; k < 3; k++)
           t.p[k] = mesh.vertices[mesh.indices[i + k]].point;
-        if (math::Len(math::Cross(t.p[1] - t.p[0], t.p[2] - t.p[0])) < 1e-4f)
+        Vec3 cross = math::Cross(t.p[1] - t.p[0], t.p[2] - t.p[0]);
+        if (math::Len(cross) < 1e-4f)
           continue;
-        t.normal = math::Norm(mesh.vertices[mesh.indices[i]].normal);
+
+        // the plane comes from the vertex normals while they are the face's, smoothed ones (phong) lean away
+        Vec3 normals = Vec3{0, 0, 0};
+        for (int k = 0; k < 3; k++) {
+          t.vertexNormal[k] = math::Norm(mesh.vertices[mesh.indices[i + k]].normal);
+          normals += t.vertexNormal[k];
+        }
+        Vec3 face = math::Norm(cross);
+        if (math::Dot(face, normals) < 0)
+          face = face * -1.0f;
+        t.normal = math::Dot(face, t.vertexNormal[0]) > 0.9999f ? t.vertexNormal[0] : face;
+        t.smooth = false;
+        for (int k = 0; k < 3; k++)
+          t.smooth |= math::Dot(t.vertexNormal[k], t.normal) < 0.9999f;
         tris.push_back(t);
       }
     }
@@ -244,7 +260,11 @@ namespace quakelib {
 
       double smin = 1e30, smax = -1e30, tmin = 1e30, tmax = -1e30;
       std::vector<std::array<PosKey, 3>> keyTris;
+      const bool smooth = std::any_of(list.begin(), list.end(), [&](int ti) { return tris[ti].smooth; });
       for (int ti : list) {
+        if (smooth)
+          for (const auto &n : tris[ti].vertexNormal)
+            chart.normals.push_back(n);
         if (opts.textureColor)
           chart.colors.push_back(colorOf(meshes[tris[ti].mesh]->textureName));
         std::array<PosKey, 3> kt;

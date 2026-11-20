@@ -48,6 +48,8 @@ namespace quakelib {
     int atlasX = 0; ///< position of the first luxel in the atlas
     int atlasY = 0;
     std::vector<Vec3> triangles; ///< world positions, 3 per triangle
+    /// vertex normals, 3 per triangle, for smoothed (phong) surfaces only; empty if they all are `normal`
+    std::vector<Vec3> normals;
     /// one per triangle, the average color of its texture (0..1) for bounced light, empty without
     /// LightmapLayoutOptions::textureColor
     std::vector<Vec3> colors;

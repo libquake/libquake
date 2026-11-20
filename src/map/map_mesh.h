@@ -14,6 +14,10 @@ namespace quakelib::detail {
   std::vector<RenderMesh> BuildEntityMeshes(map::SolidMapEntity &entity,
                                             const std::vector<std::string> &textures);
 
+  /// Phong shading as the ericw tools do it: every vertex gets the average of the normals of the faces around it
+  /// that differ from its own face by less than `maxAngle` degrees, weighted by their corner angle.
+  void SmoothNormals(std::vector<RenderMesh> &meshes, float maxAngle);
+
   /// xatlas unwrap of all solid meshes of one entity into one atlas, returns false if xatlas failed
   bool GenerateXAtlasUVs(std::vector<RenderMesh> &meshes, const LightmapUVOptions &options, int &width,
                          int &height);
@@ -28,6 +32,10 @@ namespace quakelib::detail {
   /// func_group / func_detail are part of the world for the quake compilers, other brush entities only cast
   /// shadows with "_shadow" "1", like in ericw-tools
   bool CastsShadows(const LevelEntity &entity);
+
+  /// the smoothing angle of an entity in degrees, 0 without phong shading: "_phong" "1" smooths below 89 degrees,
+  /// "_phong_angle" sets the angle and turns it on by itself, as in the ericw tools
+  float PhongAngle(const LevelEntity &entity);
 
   /// shadow casting triangles of the given brush entities plus the extra ones
   BakeOccluders BuildOccluders(const std::vector<map::SolidMapEntity *> &entities,

@@ -24,6 +24,8 @@ For historical releases, see [HISTORY.md](HISTORY.md).
   `_sunlight_dirt`, `_sunlight2_dirt` and `_dirt` on lights as in the ericw tools; `BakeQuality::dirt`,
   `dirtScale` and `dirtSamples`; `BakeSurfaces::dirtDepthScales` and `surfaceOffsetScales` for small models
 - **qviewer** gives the baker the average color of the wad textures; `--luxel-samples n` for final bakes
+- **Phong shading**: `_phong` and `_phong_angle` on brush entities smooth the vertex normals as in the ericw
+  tools, the bake lights with them; `LightmapChart::normals`
 
 ### Fixed
 

@@ -949,6 +949,119 @@ TEST_CASE("a sliver face that collapses leaves no triangles", "[map/csg]") {
       }
 }
 
+TEST_CASE("phong shading smooths the normals of a ridge", "[map/phong]") {
+  // a roof, two slopes 53 degrees apart meeting at x = 64, z = 32
+  auto roof = [](const std::string &keys) {
+    return "{\n\"classname\" \"worldspawn\"\n}\n{\n\"classname\" \"func_detail\"\n" + keys +
+           "{\n"
+           "( 0 0 0 ) ( 0 64 0 ) ( 64 0 32 ) ground1 0 0 0 1 1\n"
+           "( 128 0 0 ) ( 64 0 32 ) ( 128 64 0 ) ground1 0 0 0 1 1\n"
+           "( 0 0 0 ) ( 1 0 0 ) ( 0 1 0 ) ground1 0 0 0 1 1\n"
+           "( 0 0 0 ) ( 0 0 1 ) ( 1 0 0 ) ground1 0 0 0 1 1\n"
+           "( 0 64 0 ) ( 1 64 0 ) ( 0 64 1 ) ground1 0 0 0 1 1\n"
+           "}\n}\n";
+  };
+  // the normals at the ridge of the slopes, and the normals of the end caps
+  auto normals = [](const Level &level, std::vector<Vec3> &ridge, std::vector<Vec3> &caps) {
+    for (const auto &geometry : level.geometry)
+      for (const auto &m : geometry.meshes)
+        for (const auto &v : m.vertices) {
+          Vec3 p = v.point + geometry.pivot;
+          if (std::abs(v.normal[1]) > 0.99f)
+            caps.push_back(v.normal);
+          else if (std::abs(p[0] - 64) < 0.01f && std::abs(p[2] - 32) < 0.01f)
+            ridge.push_back(v.normal);
+        }
+  };
+
+  std::vector<Vec3> ridge, caps;
+  normals(BuildMap(ParseMapText(roof(""))), ridge, caps);
+  REQUIRE(!ridge.empty());
+  for (const auto &n : ridge)
+    REQUIRE(std::abs(n[0]) > 0.4f);
+
+  for (const std::string keys : {"\"_phong\" \"1\"\n", "\"_phong_angle\" \"60\"\n"}) {
+    ridge.clear();
+    caps.clear();
+    LightmapLayout layout;
+    normals(BuildMap(ParseMapText(roof(keys)), {}, &layout), ridge, caps);
+    REQUIRE(!ridge.empty());
+    for (const auto &n : ridge) {
+      REQUIRE(std::abs(n[0]) < 1e-4f);
+      REQUIRE(n[2] > 0.9999f);
+    }
+    // 90 degrees to the slopes, more than the angle: the end caps stay flat
+    REQUIRE(!caps.empty());
+    // the slopes keep their own plane in the lightmap and hand the smoothed normals to the baker
+    int smoothed = 0;
+    for (const auto &chart : layout.charts) {
+      if (chart.normals.empty())
+        continue;
+
+      smoothed++;
+      REQUIRE(chart.normals.size() == chart.triangles.size());
+      REQUIRE(std::abs(std::abs(chart.normal[0]) - 0.4472f) < 1e-3f);
+    }
+    REQUIRE(smoothed == 2);
+  }
+
+  // below the angle between the slopes nothing is smoothed
+  ridge.clear();
+  normals(BuildMap(ParseMapText(roof("\"_phong_angle\" \"45\"\n"))), ridge, caps);
+  for (const auto &n : ridge)
+    REQUIRE(std::abs(n[0]) > 0.4f);
+}
+
+TEST_CASE("phong shading in the bake", "[map/phong]") {
+  // the roof of the test above under a sun straight from above: flat, both ends of a slope get the same light;
+  // smoothed, the ridge faces the sun and gets more than the eave
+  auto bake = [](const std::string &keys) {
+    std::string text = "{\n\"classname\" \"worldspawn\"\n\"_sunlight\" \"100\"\n\"_sun_mangle\" \"0 -90 0\"\n"
+                       "\"_anglescale\" \"1\"\n}\n{\n\"classname\" \"func_detail\"\n" +
+                       keys +
+                       "{\n"
+                       "( 0 0 0 ) ( 0 64 0 ) ( 64 0 32 ) ground1 0 0 0 1 1\n"
+                       "( 128 0 0 ) ( 64 0 32 ) ( 128 64 0 ) ground1 0 0 0 1 1\n"
+                       "( 0 0 0 ) ( 1 0 0 ) ( 0 1 0 ) ground1 0 0 0 1 1\n"
+                       "( 0 0 0 ) ( 0 0 1 ) ( 1 0 0 ) ground1 0 0 0 1 1\n"
+                       "( 0 64 0 ) ( 1 64 0 ) ( 0 64 1 ) ground1 0 0 0 1 1\n"
+                       "}\n}\n";
+    MapBuildOptions opts;
+    opts.bake = true;
+    Level level = BuildMap(ParseMapText(text), opts);
+    // the light at the ridge and at the eave of the slope towards -x
+    int ridge = -1, eave = -1;
+    for (const auto &geometry : level.geometry)
+      for (const auto &m : geometry.meshes)
+        for (size_t i = 0; i < m.indices.size(); i++) {
+          const auto &v = m.vertices[m.indices[i]];
+          const auto &a = m.vertices[m.indices[i / 3 * 3]], &b = m.vertices[m.indices[i / 3 * 3 + 1]],
+                     &c = m.vertices[m.indices[i / 3 * 3 + 2]];
+          Vec3 center = (a.point + b.point + c.point) / 3.0f + geometry.pivot;
+          Vec3 face = math::Norm(math::Cross(b.point - a.point, c.point - a.point));
+          if (center[0] > 64 || std::abs(face[2]) < 0.5f || std::abs(face[0]) < 0.1f)
+            continue;
+
+          Vec3 p = v.point + geometry.pivot;
+          int x = (int)(v.lightmap_uv[0] * level.lightmap.width), y = (int)(v.lightmap_uv[1] * level.lightmap.height);
+          int red = level.lightmap.layers[0][((size_t)y * level.lightmap.width + x) * 4];
+          if (std::abs(p[0] - 64) < 0.01f)
+            ridge = red;
+          else if (std::abs(p[0]) < 0.01f)
+            eave = red;
+        }
+    return std::pair<int, int>{ridge, eave};
+  };
+
+  auto [flatRidge, flatEave] = bake("");
+  REQUIRE(flatEave > 0);
+  REQUIRE(std::abs(flatRidge - flatEave) <= 2);
+
+  auto [smoothRidge, smoothEave] = bake("\"_phong\" \"1\"\n");
+  REQUIRE(smoothRidge >= smoothEave + 4);
+  REQUIRE(std::abs(smoothEave - flatEave) <= 2);
+}
+
 TEST_CASE("brush entity pivots", "[map/level]") {
   std::string text = "{\n\"classname\" \"worldspawn\"\n" + box({0, 0, -16}, {256, 256, 0}, "ground1") + "}\n";
   text += "{\n\"classname\" \"func_wall\"\n" + box({64, 0, 16}, {128, 32, 48}, "ground1") + "}\n";

@@ -305,6 +305,21 @@ namespace quakelib {
       return a + ab * t;
     }
 
+    /// the vertex normals of a smoothed triangle blended at p, which lies in or on it
+    Vec3 smoothNormal(const Vec2 &p, const Tri2 &t, const Vec3 *normals) {
+      auto area = [](const Vec2 &o, const Vec2 &a, const Vec2 &b) {
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      };
+      float total = area(t.a, t.b, t.c);
+      if (std::abs(total) < 1e-12f)
+        return math::Norm(normals[0] + normals[1] + normals[2]);
+
+      float wa = std::max(0.0f, area(p, t.b, t.c) / total), wb = std::max(0.0f, area(p, t.c, t.a) / total),
+            wc = std::max(0.0f, area(p, t.a, t.b) / total);
+      Vec3 n = normals[0] * wa + normals[1] * wb + normals[2] * wc;
+      return math::Len(n) > 1e-6f ? math::Norm(n) : normals[0];
+    }
+
     bool insideTri(const Vec2 &p, const Tri2 &t) {
       auto cross = [](const Vec2 &o, const Vec2 &a, const Vec2 &b) {
         return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
@@ -446,9 +461,13 @@ namespace quakelib {
               Vec3 pos = chart.LuxelPosition(q[0], q[1], L) + chart.normal * opt.surfaceOffset;
               float occluded = dirt.Used() ? dirt.Occlusion(pos, chart.normal, bvh, occ) : 0.0f;
               occlusion += occluded * weight;
+              // light falls on the smoothed normal, the samples stay in front of the plane
+              const Vec3 normal = chart.normals.empty()
+                                      ? chart.normal
+                                      : smoothNormal(q, tris[triangle], &chart.normals[(size_t)triangle * 3]);
               for (int li : active) {
                 Vec3 value;
-                if (lightAt(lights[li], pos, chart.normal, false, bvh, occ, opt, value))
+                if (lightAt(lights[li], pos, normal, false, bvh, occ, opt, value))
                   res.Style(lights[li].style, size)[o] += value * (weight * dirt.ForLight(lights[li], occluded));
               }
             }

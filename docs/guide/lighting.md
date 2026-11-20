@@ -71,6 +71,11 @@ the size of the patches that bounce it, `skySamples` the suns of a sky dome. `lu
 every luxel 4 or 16 times for smoother shadow edges, `dirt` turns ambient occlusion on or off, `dirtScale`
 sets its strength and `dirtSamples` its rays.
 
+Brush entities with `"_phong" "1"` get smooth normals, as in the ericw tools: every vertex takes the average
+normal of the faces around it that are less than `_phong_angle` degrees apart (89 by default; the key alone
+turns phong on too). The meshes carry these normals and the bake lights with them, so rocks and terrain built
+from many small brushes look round instead of faceted. The lightmap stays on the faces' planes.
+
 The world, `func_group`, `func_detail` and entities with `"_shadow" "1"` cast shadows. Sky faces block
 light. Sunlight reaches a luxel through sky or by leaving the map, so maps without sky brushes get sun
 too.
