@@ -5,7 +5,7 @@ For historical releases, see [HISTORY.md](HISTORY.md).
 
 ---
 
-## Unreleased
+## v1.2.1 - Embree on Windows (2026-11-20)
 
 ### Added
 

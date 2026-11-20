@@ -5,7 +5,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests)
 
 project(
   quakelib
-  VERSION 1.2.0
+  VERSION 1.2.1
   LANGUAGES CXX
 )
 
