@@ -5,7 +5,7 @@ For historical releases, see [HISTORY.md](HISTORY.md).
 
 ---
 
-## Unreleased
+## v1.3.0 - Phong Bounce & Luxel Size per Entity (2026-11-22)
 
 ### Added
 
