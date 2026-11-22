@@ -81,7 +81,7 @@ namespace quakelib {
     void appendGeometry(EntityGeometry &into, EntityGeometry &&from) {
       for (auto &mesh : from.meshes) {
         auto same = std::find_if(into.meshes.begin(), into.meshes.end(), [&mesh](const RenderMesh &m) {
-          return m.textureName == mesh.textureName && m.type == mesh.type;
+          return m.textureName == mesh.textureName && m.type == mesh.type && m.luxelSize == mesh.luxelSize;
         });
         if (same == into.meshes.end()) {
           into.meshes.push_back(std::move(mesh));
@@ -206,6 +206,10 @@ namespace quakelib {
       geo.meshes = detail::BuildEntityMeshes(se, textures);
       if (float angle = detail::PhongAngle(ent); angle > 0)
         detail::SmoothNormals(geo.meshes, angle);
+      // the worldspawn's sets the layout's own
+      if (float luxel = ent.Float("_world_units_per_luxel"); luxel > 0 && ent.classname != "worldspawn")
+        for (auto &m : geo.meshes)
+          m.luxelSize = luxel;
       geo.hulls = detail::BuildCollisionHulls(se, textures);
       setBounds(geo);
       if (auto origin = detail::OriginBrushCenter(se, textures))
@@ -232,6 +236,9 @@ namespace quakelib {
           all.push_back(&m);
       LightmapLayoutOptions layoutOpts;
       layoutOpts.luxelSize = options.lightmapUV.luxelSize;
+      for (const auto &ent : level.entities)
+        if (float luxel = ent.Float("_world_units_per_luxel"); luxel > 0 && ent.classname == "worldspawn")
+          layoutOpts.luxelSize = luxel;
       layoutOpts.padding = (int)options.lightmapUV.padding;
       layoutOpts.textureColor = options.textureColor;
       LightmapLayout layout = BuildLightmapLayout(all, layoutOpts);

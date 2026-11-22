@@ -20,9 +20,10 @@ namespace quakelib {
     struct PlaneKey {
       int64_t n[3];
       int64_t d;
+      int64_t luxel; // faces with different luxel sizes do not share a chart
 
       bool operator<(const PlaneKey &o) const {
-        return std::tie(n[0], n[1], n[2], d) < std::tie(o.n[0], o.n[1], o.n[2], o.d);
+        return std::tie(n[0], n[1], n[2], d, luxel) < std::tie(o.n[0], o.n[1], o.n[2], o.d, o.luxel);
       }
     };
 
@@ -33,6 +34,7 @@ namespace quakelib {
       Vec3 normal;
       Vec3 vertexNormal[3];
       bool smooth; ///< vertex normals that differ from the plane's
+      float luxelSize;
     };
 
     struct UnionFind {
@@ -176,7 +178,6 @@ namespace quakelib {
     LightmapLayout layout;
     layout.luxelSize = opts.luxelSize;
     layout.padding = std::max(0, opts.padding);
-    const float L = opts.luxelSize;
     auto isUnlit = opts.isUnlit ? opts.isUnlit : IsQuakeUnlitTexture;
     // one lookup per texture, the callback may average all its pixels
     std::map<std::string, Vec3> colorCache;
@@ -214,6 +215,7 @@ namespace quakelib {
         t.smooth = false;
         for (int k = 0; k < 3; k++)
           t.smooth |= math::Dot(t.vertexNormal[k], t.normal) < 0.9999f;
+        t.luxelSize = mesh.luxelSize > 0 ? mesh.luxelSize : opts.luxelSize;
         tris.push_back(t);
       }
     }
@@ -224,7 +226,7 @@ namespace quakelib {
       const auto &t = tris[i];
       PlaneKey k{
           {std::llround(t.normal[0] * 1e4), std::llround(t.normal[1] * 1e4), std::llround(t.normal[2] * 1e4)},
-          std::llround(math::Dot(t.normal, t.p[0]) * 100.0)};
+          std::llround(math::Dot(t.normal, t.p[0]) * 100.0), std::llround(t.luxelSize * 1000.0)};
       byPlane[k].push_back(i);
     }
 
@@ -255,6 +257,8 @@ namespace quakelib {
       const auto &t0 = tris[list[0]];
       chart.normal = t0.normal;
       chart.dist = math::Dot(t0.normal, t0.p[0]);
+      chart.luxelSize = t0.luxelSize;
+      const float L = chart.luxelSize;
       chart.uAxis = Vec3{};
       chartBasis(chart.normal, chart.uAxis, chart.vAxis);
 
@@ -291,6 +295,7 @@ namespace quakelib {
       for (int k = 0; k < 3; k++)
         h = fnv(h, std::llround(chart.normal[k] * 1e4));
       h = fnv(h, std::llround(chart.dist * 100.0));
+      h = fnv(h, std::llround(chart.luxelSize * 1000.0));
       for (const auto &kt : keyTris)
         for (const auto &pk : kt)
           for (auto c : pk)
@@ -362,8 +367,8 @@ namespace quakelib {
               v.lightmap_uv = unlitUV;
             } else {
               const auto &c = layout.charts[ci];
-              double s = math::Dot(v.point, c.uAxis) / L - c.gridMin[0];
-              double t = math::Dot(v.point, c.vAxis) / L - c.gridMin[1];
+              double s = math::Dot(v.point, c.uAxis) / c.luxelSize - c.gridMin[0];
+              double t = math::Dot(v.point, c.vAxis) / c.luxelSize - c.gridMin[1];
               v.lightmap_uv = Vec2{(float)((c.atlasX + s + 0.5) / W), (float)((c.atlasY + t + 0.5) / H)};
             }
             verts.push_back(v);

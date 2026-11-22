@@ -74,7 +74,15 @@ sets its strength and `dirtSamples` its rays.
 Brush entities with `"_phong" "1"` get smooth normals, as in the ericw tools: every vertex takes the average
 normal of the faces around it that are less than `_phong_angle` degrees apart (89 by default; the key alone
 turns phong on too). The meshes carry these normals and the bake lights with them, so rocks and terrain built
-from many small brushes look round instead of faceted. The lightmap stays on the faces' planes.
+from many small brushes look round instead of faceted. Bounced light on them comes from the patches around
+each luxel, whichever face they lie on, so it runs on across the edges too. The lightmap stays on the faces'
+planes: faces only a luxel or two wide still show a step at their edges, finer luxels even it out.
+
+`_world_units_per_luxel` sets the map units per luxel as in the ericw tools: on a brush entity for its faces,
+on the worldspawn for all others, in place of `LightmapUVOptions::luxelSize`. Finer luxels on a detailed or
+round entity give it sharper shadows and smoother light without baking the whole map finer. Faces with
+different luxel sizes get charts of their own, also where they lie in one plane. Only the planar layout uses
+it, xatlas keeps its own scale.
 
 The world, `func_group`, `func_detail` and entities with `"_shadow" "1"` cast shadows. Sky faces block
 light. Sunlight reaches a luxel through sky or by leaving the map, so maps without sky brushes get sun

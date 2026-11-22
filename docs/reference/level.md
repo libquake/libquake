@@ -51,6 +51,7 @@ Values are never converted to OpenGL coordinates.
 | `std::vector<Vertex> vertices` | |
 | `std::vector<uint32_t> indices` | triangle list |
 | `SurfaceType type` | `SOLID`, `CLIP`, `SKIP` or `NODRAW` |
+| `float luxelSize` | map units per luxel in the planar lightmap layout (`_world_units_per_luxel`), 0 for the layout's |
 
 ## Vertex
 

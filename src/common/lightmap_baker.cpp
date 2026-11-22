@@ -5,6 +5,7 @@
 #include "parallel.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <map>
@@ -337,6 +338,9 @@ namespace quakelib {
       std::vector<uint32_t> triangle;
       // per luxel, with ambient occlusion only
       std::vector<float> occlusion;
+      // for bounced light on smoothed charts, per luxel: the point on the surface and its smoothed normal
+      std::vector<Vec3> surface;
+      std::vector<Vec3> normal;
 
       std::vector<Vec3> &Style(int style, size_t size) {
         for (size_t i = 0; i < styles.size(); i++)
@@ -399,6 +403,10 @@ namespace quakelib {
       if (bounceCount(opt) > 0) {
         res.inside.assign(size, 0);
         res.triangle.assign(size, 0);
+        if (!chart.normals.empty()) {
+          res.surface.assign(size, Vec3{0, 0, 0});
+          res.normal.assign(size, chart.normal);
+        }
       }
 
       if (dirt.Used())
@@ -447,9 +455,13 @@ namespace quakelib {
           if (!res.inside.empty()) {
             bool inside;
             uint32_t triangle;
-            onSurface(Vec2{(float)i, (float)j}, inside, triangle);
+            Vec2 q = onSurface(Vec2{(float)i, (float)j}, inside, triangle);
             res.inside[o] = inside;
             res.triangle[o] = triangle;
+            if (!res.normal.empty()) {
+              res.surface[o] = chart.LuxelPosition(q[0], q[1], L);
+              res.normal[o] = smoothNormal(q, tris[triangle], &chart.normals[(size_t)triangle * 3]);
+            }
           }
 
           float occlusion = 0;
@@ -467,7 +479,7 @@ namespace quakelib {
                                       : smoothNormal(q, tris[triangle], &chart.normals[(size_t)triangle * 3]);
               for (int li : active) {
                 Vec3 value;
-                if (lightAt(lights[li], pos, normal, false, bvh, occ, opt, value))
+                if (lightAt(lights[li], pos, normal, !chart.normals.empty(), bvh, occ, opt, value))
                   res.Style(lights[li].style, size)[o] += value * (weight * dirt.ForLight(lights[li], occluded));
               }
             }
@@ -478,6 +490,15 @@ namespace quakelib {
       return res;
     }
 
+    float luxelSizeOf(const LightmapLayout &layout, const LightmapChart &chart) {
+      return chart.luxelSize > 0 ? chart.luxelSize : layout.luxelSize;
+    }
+
+    // luxels per side of a bounce patch
+    int blockOf(float luxelSize, const BakeOptions &opt) {
+      return std::max(1, (int)std::lround(opt.quality.bounceSubdivision / luxelSize));
+    }
+
     // what a surface reflects: gray mixed with its texture's color as much as _bouncecolorscale says
     Vec3 reflectance(const std::vector<Vec3> &colors, uint32_t triangle, const BakeOptions &opt) {
       constexpr float GRAY = 127.0f / 255.0f;
@@ -486,19 +507,28 @@ namespace quakelib {
     }
 
     /// Bounced light for planar charts: blocks of luxels in each chart are the patches, the light they
-    /// receive is spread back over the luxels bilinearly between the blocks of the same chart.
+    /// receive is spread back over the luxels bilinearly between the blocks of the same chart. Smoothed
+    /// (phong) charts take it from the patches around each luxel in space instead, whichever chart they
+    /// belong to, so it runs on across the edges between their faces.
     void bounceCharts(const LightmapLayout &layout, std::vector<ChartResult> &results, const Bvh &bvh,
                       const BakeOptions &opt, const Dirt &dirt) {
-      const float L = layout.luxelSize;
-      const int block = std::max(1, (int)std::lround(opt.quality.bounceSubdivision / L));
+      // patches turned further from a luxel's smoothed normal than this cosine leave it out, fading in above
+      constexpr float SMOOTH_FACING = 0.5f;
 
       std::vector<BouncePatch> patches;
+      // where a patch spreads its light on smoothed charts: on the surface, facing its smoothed normal, as
+      // far as the patches of its chart lie apart
+      std::vector<Vec3> spreadPoint, spreadNormal;
+      std::vector<float> spreadReach;
+      float cellSize = 0;
       std::vector<uint32_t> patchChart;
       std::vector<std::vector<uint32_t>> members; // luxels of each patch
       std::vector<std::vector<int>> blockPatch(layout.charts.size()); // per chart and block, -1 for none
       for (size_t c = 0; c < layout.charts.size(); c++) {
         const auto &chart = layout.charts[c];
         const auto &res = results[c];
+        const float L = luxelSizeOf(layout, chart);
+        const int block = blockOf(L, opt);
         const int cols = (chart.width + block - 1) / block, rows = (chart.height + block - 1) / block;
         blockPatch[c].assign((size_t)cols * rows, -1);
         // charts too thin for any luxel inside take all of them
@@ -539,6 +569,10 @@ namespace quakelib {
             patch.area = (float)luxels.size() * L * L;
             patch.offset = opt.surfaceOffset;
             blockPatch[c][(size_t)by * cols + bx] = (int)patches.size();
+            spreadPoint.push_back(res.surface.empty() ? patch.position : res.surface[at]);
+            spreadNormal.push_back(res.normal.empty() ? chart.normal : res.normal[at]);
+            spreadReach.push_back(block * L);
+            cellSize = std::max(cellSize, block * L);
             patches.push_back(patch);
             patchChart.push_back((uint32_t)c);
             members.push_back(std::move(luxels));
@@ -546,6 +580,50 @@ namespace quakelib {
       }
       if (patches.empty())
         return;
+
+      using Cell = std::array<int, 3>;
+      auto cellOf = [&](const Vec3 &p) {
+        return Cell{(int)std::floor(p[0] / cellSize), (int)std::floor(p[1] / cellSize),
+                    (int)std::floor(p[2] / cellSize)};
+      };
+      std::map<Cell, std::vector<int>> cells;
+      if (std::any_of(results.begin(), results.end(), [](const ChartResult &r) { return !r.normal.empty(); }))
+        for (int p = 0; p < (int)patches.size(); p++)
+          cells[cellOf(spreadPoint[p])].push_back(p);
+
+      // the same point and normal get the same light on every chart, so neighbouring faces meet at their edge
+      auto spreadSmooth = [&](const std::vector<Vec3> &bounced, const Vec3 &point, const Vec3 &normal,
+                              Vec3 &out) {
+        const Cell at = cellOf(point);
+        Vec3 sum{0, 0, 0};
+        float weights = 0;
+        for (int dz = -1; dz <= 1; dz++)
+          for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+              auto it = cells.find(Cell{at[0] + dx, at[1] + dy, at[2] + dz});
+              if (it == cells.end())
+                continue;
+
+              for (int p : it->second) {
+                const Vec3 d = point - spreadPoint[p];
+                const float reach = spreadReach[p];
+                const float dist = math::Len(d);
+                const float facing = math::Dot(normal, spreadNormal[p]);
+                if (dist >= reach || facing <= SMOOTH_FACING ||
+                    std::abs(math::Dot(spreadNormal[p], d)) > 0.5f * reach)
+                  continue;
+
+                const float wgt = (1.0f - dist / reach) * (facing - SMOOTH_FACING) / (1.0f - SMOOTH_FACING);
+                sum += bounced[p] * wgt;
+                weights += wgt;
+              }
+            }
+        if (weights <= 0)
+          return false;
+
+        out = sum / weights;
+        return true;
+      };
 
       std::vector<int> styles{0};
       if (opt.bounceStyled)
@@ -573,11 +651,43 @@ namespace quakelib {
         ParallelFor(layout.charts.size(), opt.threads, [&](size_t c) {
           const auto &chart = layout.charts[c];
           const auto &ids = blockPatch[c];
+          const int block = blockOf(luxelSizeOf(layout, chart), opt);
           const int cols = (chart.width + block - 1) / block, rows = (chart.height + block - 1) / block;
           auto patchAt = [&](int bx, int by) {
             return bx < 0 || by < 0 || bx >= cols || by >= rows ? -1 : ids[(size_t)by * cols + bx];
           };
-          bool any = false;
+          // bilinear between the four nearest block centers, blocks without a patch left out
+          auto spreadBlocks = [&](int i, int j, Vec3 &out) {
+            float fx = (i + 0.5f) / block - 0.5f, fy = (j + 0.5f) / block - 0.5f;
+            int x0 = (int)std::floor(fx), y0 = (int)std::floor(fy);
+            float tx = fx - x0, ty = fy - y0;
+            Vec3 sum{0, 0, 0};
+            float weights = 0;
+            for (int dy = 0; dy < 2; dy++)
+              for (int dx = 0; dx < 2; dx++) {
+                int id = patchAt(x0 + dx, y0 + dy);
+                if (id < 0)
+                  continue;
+
+                float wgt = (dx ? tx : 1 - tx) * (dy ? ty : 1 - ty);
+                sum += bounced[id] * wgt;
+                weights += wgt;
+              }
+            if (weights <= 0) {
+              int id = patchAt(i / block, j / block);
+              if (id < 0)
+                return false;
+
+              sum = bounced[id];
+              weights = 1;
+            }
+            out = sum / weights;
+            return true;
+          };
+
+          const auto &res = results[c];
+          const bool smooth = !res.normal.empty();
+          bool any = smooth;
           for (int id : ids)
             any |= id >= 0 && maxComponent(bounced[id]) > 0;
           if (!any)
@@ -586,33 +696,14 @@ namespace quakelib {
           auto &values = results[c].Style(style, (size_t)chart.width * chart.height);
           for (int j = 0; j < chart.height; j++)
             for (int i = 0; i < chart.width; i++) {
-              // bilinear between the four nearest block centers, blocks without a patch left out
-              float fx = (i + 0.5f) / block - 0.5f, fy = (j + 0.5f) / block - 0.5f;
-              int x0 = (int)std::floor(fx), y0 = (int)std::floor(fy);
-              float tx = fx - x0, ty = fy - y0;
-              Vec3 sum{0, 0, 0};
-              float weights = 0;
-              for (int dy = 0; dy < 2; dy++)
-                for (int dx = 0; dx < 2; dx++) {
-                  int id = patchAt(x0 + dx, y0 + dy);
-                  if (id < 0)
-                    continue;
-
-                  float wgt = (dx ? tx : 1 - tx) * (dy ? ty : 1 - ty);
-                  sum += bounced[id] * wgt;
-                  weights += wgt;
-                }
-              if (weights <= 0) {
-                int id = patchAt(i / block, j / block);
-                if (id < 0)
-                  continue;
-
-                sum = bounced[id];
-                weights = 1;
-              }
               size_t o = (size_t)j * chart.width + i;
-              const auto &occlusion = results[c].occlusion;
-              values[o] += sum / weights * (occlusion.empty() ? 1.0f : dirt.ForBounce(occlusion[o]));
+              Vec3 add;
+              const bool spread = (smooth && spreadSmooth(bounced, res.surface[o], res.normal[o], add)) ||
+                                  spreadBlocks(i, j, add);
+              if (!spread)
+                continue;
+
+              values[o] += add * (res.occlusion.empty() ? 1.0f : dirt.ForBounce(res.occlusion[o]));
             }
         });
       }
@@ -805,7 +896,7 @@ namespace quakelib {
       // the block size follows the texels on average, how far texels group or share follows their own size: a
       // model's small texels sit next to a map's large ones in the same atlas
       const float texel = (float)std::sqrt(worldArea / uvArea);
-      const int block = std::max(1, (int)std::lround(opt.quality.bounceSubdivision / texel));
+      const int block = blockOf(texel, opt);
       auto sizeOf = [&](const TexelSample &t) { return std::sqrt(texelArea[t.triangle]); };
       const int cols = (s.width + block - 1) / block, rows = (s.height + block - 1) / block;
       auto covered = [&](size_t o) { return samples[o].distance <= COVER_DISTANCE; };
@@ -975,7 +1066,8 @@ namespace quakelib {
     const Dirt dirt(options, ls);
     std::vector<ChartResult> results(layout.charts.size());
     ParallelFor(layout.charts.size(), options.threads, [&](size_t c) {
-      results[c] = bakeChart(layout.charts[c], layout.luxelSize, bvh, occluders, ls, ranges, options, dirt);
+      const auto &chart = layout.charts[c];
+      results[c] = bakeChart(chart, luxelSizeOf(layout, chart), bvh, occluders, ls, ranges, options, dirt);
     });
     if (bounceCount(options) > 0)
       bounceCharts(layout, results, bvh, options, dirt);

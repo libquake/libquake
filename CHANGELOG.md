@@ -5,6 +5,22 @@ For historical releases, see [HISTORY.md](HISTORY.md).
 
 ---
 
+## Unreleased
+
+### Added
+
+- **`_world_units_per_luxel`** as in the ericw tools: map units per luxel for a brush entity, or for the whole
+  map on the worldspawn; `RenderMesh::luxelSize` and `LightmapChart::luxelSize`, the planar layout and the
+  baker use each chart's own
+
+### Fixed
+
+- **Phong and bounced light**: smoothed faces took the bounced light of their own patches only, so it jumped at
+  every edge between them; they now gather it from the patches around each luxel in space. The angle term fades
+  out with the smoothed normal on map faces too, as it already did on meshes
+
+---
+
 ## v1.2.1 - Embree on Windows (2026-11-20)
 
 ### Added

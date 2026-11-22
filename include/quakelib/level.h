@@ -54,6 +54,8 @@ namespace quakelib {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     SurfaceType type{SurfaceType::SOLID};
+    /// map units per luxel in the planar lightmap layout (_world_units_per_luxel), 0 for the layout's
+    float luxelSize = 0;
   };
 
   /**

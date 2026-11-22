@@ -162,7 +162,7 @@ charts are split. The result is deterministic.
 | `LightmapLayout` | |
 |---|---|
 | `int width`, `height` | atlas size |
-| `float luxelSize` | |
+| `float luxelSize` | of charts without their own |
 | `int padding` | |
 | `int unlitX`, `unlitY` | texel used by faces without a chart, baked to 128 |
 | `std::vector<LightmapChart> charts` | |
@@ -172,6 +172,7 @@ charts are split. The result is deterministic.
 | `uint64_t key` | hash of plane and triangles, stable while the geometry is |
 | `Vec3 normal`, `float dist` | plane |
 | `Vec3 uAxis`, `vAxis` | in the plane |
+| `float luxelSize` | map units per luxel, 0 for the layout's |
 | `int gridMin[2]` | world grid index of the first luxel |
 | `int width`, `height` | in luxels |
 | `int atlasX`, `atlasY` | position in the atlas |
@@ -182,7 +183,7 @@ charts are split. The result is deterministic.
 
 | `LightmapLayoutOptions` | Default | |
 |---|---|---|
-| `float luxelSize` | 16 | |
+| `float luxelSize` | 16 | meshes with their own `RenderMesh::luxelSize` keep it |
 | `int padding` | 1 | |
 | `std::function<bool(const std::string &)> isUnlit` | sky and liquids | textures without lightmap space |
 | `std::function<Vec3(const std::string &)> textureColor` | none | average texture color (0..1), fills `LightmapChart::colors` |

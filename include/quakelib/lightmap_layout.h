@@ -33,8 +33,8 @@ namespace quakelib {
   /**
    * @brief One rectangle of the lightmap atlas, covering a connected region of coplanar triangles.
    *
-   * Luxels sit on a world aligned grid: luxel (i, j) of the chart samples the plane at
-   * uAxis * (gridMin[0] + i) * luxelSize + vAxis * (gridMin[1] + j) * luxelSize + normal * dist.
+   * Luxels sit on a world aligned grid of the chart's luxel size: luxel (i, j) of the chart samples the
+   * plane at uAxis * (gridMin[0] + i) * luxelSize + vAxis * (gridMin[1] + j) * luxelSize + normal * dist.
    */
   struct LightmapChart {
     uint64_t key = 0; ///< content hash (plane + triangles), stays the same while the geometry does
@@ -42,6 +42,7 @@ namespace quakelib {
     float dist = 0;
     Vec3 uAxis{};         ///< unit length, in the plane
     Vec3 vAxis{};         ///< unit length, in the plane, cross(normal, uAxis)
+    float luxelSize = 0;  ///< map units per luxel, 0 for the layout's
     int gridMin[2] = {0}; ///< world grid index of the first luxel
     int width = 0;        ///< luxels
     int height = 0;
@@ -63,7 +64,7 @@ namespace quakelib {
   struct LightmapLayout {
     int width = 0;
     int height = 0;
-    float luxelSize = 16.0f;
+    float luxelSize = 16.0f; ///< of charts without their own
     int padding = 1;
     /// Texel used by faces without a chart (sky, liquids, clip...), the baker sets it to 128.
     int unlitX = 0;
@@ -72,8 +73,9 @@ namespace quakelib {
   };
 
   struct LightmapLayoutOptions {
-    float luxelSize = 16.0f; ///< map units per luxel, 16 is what Quake uses
-    int padding = 1;         ///< empty texels between charts
+    /// map units per luxel, 16 is what Quake uses; meshes with their own RenderMesh::luxelSize keep it
+    float luxelSize = 16.0f;
+    int padding = 1; ///< empty texels between charts
     /// Faces of these textures get no lightmap space. Default: sky and liquids, which Quake draws unlit.
     std::function<bool(const std::string &textureName)> isUnlit;
     /// average color of a texture (0..1), fills LightmapChart::colors

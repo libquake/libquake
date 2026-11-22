@@ -1062,6 +1062,166 @@ TEST_CASE("phong shading in the bake", "[map/phong]") {
   REQUIRE(std::abs(smoothEave - flatEave) <= 2);
 }
 
+TEST_CASE("bounced light runs on across the edges of smoothed faces", "[map/phong]") {
+  // the roof of the tests above on a floor, a light on the -x side: the floor bounces light onto the slope
+  // towards it, the other slope sees only floor in the roof's shadow. A strong bounce, so it shows in bytes.
+  auto ridgeOfSlopes = [](const std::string &keys, const std::string &bounce) {
+    std::string text = "{\n\"classname\" \"worldspawn\"\n\"_bounce\" \"" + bounce +
+                       "\"\n\"_bouncescale\" \"16\"\n" +
+                       box({-512, -256, -16}, {640, 320, 0}, "ground1") +
+                       "}\n{\n\"classname\" \"light\"\n\"origin\" \"-192 32 96\"\n\"light\" \"300\"\n}\n"
+                       "{\n\"classname\" \"func_detail\"\n" +
+                       keys +
+                       "{\n"
+                       "( 0 0 0 ) ( 0 64 0 ) ( 64 0 32 ) ground1 0 0 0 1 1\n"
+                       "( 128 0 0 ) ( 64 0 32 ) ( 128 64 0 ) ground1 0 0 0 1 1\n"
+                       "( 0 0 0 ) ( 1 0 0 ) ( 0 1 0 ) ground1 0 0 0 1 1\n"
+                       "( 0 0 0 ) ( 0 0 1 ) ( 1 0 0 ) ground1 0 0 0 1 1\n"
+                       "( 0 64 0 ) ( 1 64 0 ) ( 0 64 1 ) ground1 0 0 0 1 1\n"
+                       "}\n}\n";
+    MapBuildOptions opts;
+    opts.bake = true;
+    Level level = BuildMap(ParseMapText(text), opts);
+    // the light at the middle of the ridge, on the slope towards -x and on the one towards +x
+    int toLight = -1, away = -1;
+    for (const auto &geometry : level.geometry)
+      for (const auto &m : geometry.meshes)
+        for (size_t t = 0; t + 2 < m.indices.size(); t += 3) {
+          const auto &a = m.vertices[m.indices[t]], &b = m.vertices[m.indices[t + 1]],
+                     &c = m.vertices[m.indices[t + 2]];
+          Vec3 face = math::Norm(math::Cross(b.point - a.point, c.point - a.point));
+          if (std::abs(face[2]) < 0.5f || std::abs(face[0]) < 0.1f)
+            continue;
+
+          // the ridge edge of the triangle, if it has one
+          const Vertex *ends[2];
+          int found = 0;
+          for (const auto *v : {&a, &b, &c})
+            if (found < 2 && std::abs(v->point[0] + geometry.pivot[0] - 64) < 0.01f)
+              ends[found++] = v;
+          if (found < 2)
+            continue;
+
+          float u = (ends[0]->lightmap_uv[0] + ends[1]->lightmap_uv[0]) * 0.5f;
+          float v = (ends[0]->lightmap_uv[1] + ends[1]->lightmap_uv[1]) * 0.5f;
+          int x = (int)(u * level.lightmap.width), y = (int)(v * level.lightmap.height);
+          int red = level.lightmap.layers[0][((size_t)y * level.lightmap.width + x) * 4];
+          (face[0] * face[2] < 0 ? toLight : away) = red;
+        }
+    return std::pair<int, int>{toLight, away};
+  };
+
+  // the bounced light alone, with bounce less without: the direct light stops at the ridge on both, the
+  // slope away from the light has it behind its plane
+  auto bouncedAtRidge = [&](const std::string &keys) {
+    auto [toLight, away] = ridgeOfSlopes(keys, "1");
+    auto [directToLight, directAway] = ridgeOfSlopes(keys, "0");
+    REQUIRE(toLight >= 0);
+    REQUIRE(away >= 0);
+    return std::pair<int, int>{toLight - directToLight, away - directAway};
+  };
+
+  // flat, each slope keeps the light of its own patch up to the ridge
+  auto [flatToLight, flatAway] = bouncedAtRidge("");
+  REQUIRE(flatToLight >= flatAway + 8);
+
+  // smoothed, both slopes have the same normal at the ridge and get the same bounced light there
+  auto [smoothToLight, smoothAway] = bouncedAtRidge("\"_phong\" \"1\"\n");
+  REQUIRE(smoothAway > 0);
+  REQUIRE(std::abs(smoothToLight - smoothAway) <= 3);
+}
+
+TEST_CASE("_world_units_per_luxel sets the luxel size of a brush entity", "[map/lightmap]") {
+  // a floor and a slab of 64 x 64 next to it, its top in the floor's plane
+  auto charts = [](const std::string &worldKeys, const std::string &slabKeys, bool mergeGroups = false) {
+    std::string text = "{\n\"classname\" \"worldspawn\"\n" + worldKeys + box({0, 0, -16}, {128, 64, 0}, "ground1") +
+                       "}\n{\n\"classname\" \"func_group\"\n\"_tb_type\" \"_tb_group\"\n\"_tb_id\" \"1\"\n}\n"
+                       "{\n\"classname\" \"func_detail\"\n\"_tb_group\" \"1\"\n" +
+                       slabKeys + box({128, 0, -16}, {192, 64, 0}, "ground1") + "}\n";
+    MapBuildOptions opts;
+    opts.mergeGroups = mergeGroups;
+    LightmapLayout layout;
+    BuildMap(ParseMapText(text), opts, &layout);
+    // luxel size and width of the charts on top, from -x to +x
+    std::map<float, std::pair<float, int>> tops;
+    for (const auto &chart : layout.charts) {
+      if (chart.normal[2] < 0.99f)
+        continue;
+
+      float left = 1e9f;
+      for (const auto &p : chart.triangles)
+        left = std::min(left, p[0]);
+      tops[left] = {chart.luxelSize, chart.width};
+    }
+    std::vector<std::pair<float, int>> out;
+    for (const auto &[left, top] : tops)
+      out.push_back(top);
+    return out;
+  };
+
+  // one size, the tops join in one chart
+  auto plain = charts("", "");
+  REQUIRE(plain.size() == 1);
+  REQUIRE(plain[0].first == 16);
+  REQUIRE(plain[0].second == 13);
+
+  // only the slab gets finer, its top no longer joins the floor's chart
+  auto fine = charts("", "\"_world_units_per_luxel\" \"4\"\n");
+  REQUIRE(fine.size() == 2);
+  REQUIRE(fine[0].first == 16);
+  REQUIRE(fine[1].first == 4);
+  REQUIRE(fine[1].second == 17);
+
+  // also in a trenchbroom group merged into one geometry
+  auto merged = charts("", "\"_world_units_per_luxel\" \"4\"\n", true);
+  REQUIRE(merged.size() == 2);
+  REQUIRE(merged[0].first == 16);
+  REQUIRE(merged[1].first == 4);
+
+  // the worldspawn's sets it for all, entities keep their own
+  auto world = charts("\"_world_units_per_luxel\" \"8\"\n", "");
+  REQUIRE(world.size() == 1);
+  REQUIRE(world[0].first == 8);
+  auto both = charts("\"_world_units_per_luxel\" \"8\"\n", "\"_world_units_per_luxel\" \"4\"\n");
+  REQUIRE(both.size() == 2);
+  REQUIRE(both[0].first == 8);
+  REQUIRE(both[1].first == 4);
+}
+
+TEST_CASE("finer luxels bake the same light", "[map/lightmap]") {
+  // the floor and slab of the test above under a light over their common edge: at the same distance from
+  // it both get the same light, whatever their luxel size
+  std::string text = "{\n\"classname\" \"worldspawn\"\n" +
+                     box({0, 0, -16}, {128, 64, 0}, "ground1") +
+                     "}\n{\n\"classname\" \"light\"\n\"origin\" \"128 32 64\"\n\"light\" \"150\"\n}\n"
+                     "{\n\"classname\" \"func_detail\"\n\"_world_units_per_luxel\" \"4\"\n" +
+                     box({128, 0, -16}, {192, 64, 0}, "ground1") + "}\n";
+  MapBuildOptions opts;
+  opts.bake = true;
+  LightmapLayout layout;
+  Level level = BuildMap(ParseMapText(text), opts, &layout);
+  // the luxel of each top that sits 24 units from the edge, mirrored
+  auto lightAt = [&](float x) {
+    for (const auto &chart : layout.charts) {
+      if (chart.normal[2] < 0.99f)
+        continue;
+
+      const float L = chart.luxelSize;
+      float i = math::Dot(Vec3{x, 32, 0}, chart.uAxis) / L - chart.gridMin[0];
+      float j = math::Dot(Vec3{x, 32, 0}, chart.vAxis) / L - chart.gridMin[1];
+      if (i < 0 || j < 0 || i > chart.width - 1 || j > chart.height - 1)
+        continue;
+
+      int px = chart.atlasX + (int)std::lround(i), py = chart.atlasY + (int)std::lround(j);
+      return (int)level.lightmap.layers[0][((size_t)py * level.lightmap.width + px) * 4];
+    }
+    return -1;
+  };
+  int coarse = lightAt(128 - 24), fine = lightAt(128 + 24);
+  REQUIRE(coarse > 0);
+  REQUIRE(std::abs(coarse - fine) <= 3);
+}
+
 TEST_CASE("brushes of the world model cut each other across entities", "[map/csg]") {
   // a box of `cutter` standing in a floor of `floor`; cut, the floor's top keeps no face under the box
   auto floorUnderBox = [](const std::string &floor, const std::string &cutter) {
